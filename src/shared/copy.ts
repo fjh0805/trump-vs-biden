@@ -1,0 +1,17 @@
+export const COPY = {
+  title: "《特朗普大战拜登》",
+  create: "创建房间",
+  join: "加入房间",
+  code: "房间码",
+  start: "开始游戏",
+  mute: "静音",
+  speaker: "扬声器",
+  mode1: "1v1 对战",
+  mode2: "双人同边打 AI",
+  connecting: "正在连房间…",
+  peerWait: "对方掉线，等待重连 15s",
+  sendAll: "全部",
+  sfx: "音效",
+  gotIt: "知道了",
+  tutorial: ["先点亮着的老家", "有视野就能出兵，可滑过多州集结", "双指拉地图，开麦报州名"],
+} as const;

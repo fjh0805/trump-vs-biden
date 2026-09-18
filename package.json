@@ -1,0 +1,27 @@
+{
+  "name": "telangpu-dazhan-baideng",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 43123",
+    "build": "vite build",
+    "preview": "npm run build && vite preview --host 0.0.0.0 --port 43123",
+    "deploy": "npm run build && wrangler deploy",
+    "types": "wrangler types",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "bake-map": "node scripts/bake-map.mjs",
+    "start": "wrangler dev --port 43123 --ip 0.0.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.54.10",
+    "@types/d3-geo": "^3.1.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "wrangler": "^4.20.0"
+  },
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "topojson-client": "^3.1.0"
+  }
+}
