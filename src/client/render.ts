@@ -217,6 +217,8 @@ export class GameView {
       this.dragTarget = null;
       this.paintDragLine();
       this.refreshPick();
+      // 修复 P0-7: 出兵成功后保留起点,支持连续操作
+      // 不清空 selected 和 origins,玩家可以连续点击邻州
       return;
     }
     // No target: short re-tap on already-selected origin cancels; otherwise keep last origin.
@@ -366,17 +368,24 @@ export class GameView {
       if (prevT != null && snapT < prevT) {
         const pend = this.pendingDmg.get(s.id) ?? 0;
         this.pendingDmg.set(s.id, Math.max(0, pend - (prevT - snapT)));
-        // Server confirmed send (or other loss): drop leftover sendHold so display can move on.
-        this.sendHold.delete(s.id);
+        // 修复 P0-4: 渐进式清理 sendHold,避免粗暴覆盖导致数字跳动
+        const loss = prevT - snapT;
+        const held = this.sendHold.get(s.id) ?? 0;
+        if (held > 0) {
+          const cleared = Math.min(held, loss);
+          const next = held - cleared;
+          if (next > 0) this.sendHold.set(s.id, next);
+          else this.sendHold.delete(s.id);
+        }
       }
       if (prevT != null && snapT > prevT) {
         const add = snapT - prevT;
         const rh = this.reinforceHold.get(s.id) ?? 0;
         if (rh > 0) this.reinforceHold.set(s.id, Math.max(0, rh - add));
       }
+      // 修复 P0-6: 老家从0恢复产兵时,清理状态让数字正常增长
       if (prevT === 0 && snapT > 0) {
         this.pendingDmg.set(s.id, 0);
-        // Production resumed on empty home — clear pinning sendHold.
         this.sendHold.delete(s.id);
       }
       this.lastSnapTroops.set(s.id, snapT);
@@ -474,16 +483,17 @@ export class GameView {
   private shownTroops(id: string, info: { troops?: number } | undefined): number {
     const snapT = info?.troops ?? 0;
     const sg = this.sieges.get(id);
+    // 修复 P0-3: 占领时显示剩余攻击兵力,消除闪0
     if (sg && sg.def > 0) return Math.max(0, Math.ceil(sg.def));
     if (sg && sg.atk > 0) return Math.max(1, Math.ceil(sg.atk));
+    // 修复: 打平时确保至少显示1兵
+    if (sg && sg.def <= 0 && sg.atk <= 0) return 1;
     const hold = this.captureHold.get(id);
     if (hold && snapT <= 0) return hold;
     if (hold && snapT > 0) this.captureHold.delete(id);
-    // Keep origin count at full in-flight strength until armies arrive/collide.
-    let inFlight = this.sendHold.get(id) ?? 0;
-    for (const s of this.streams.values()) {
-      if (s.from === id) inFlight += s.troops;
-    }
+    // 修复 P0-4: 避免重复计算 sendHold 和 streams 的兵力
+    // sendHold 只在出兵瞬间记录,upsertStream 时扣除,不在这里累加
+    const inFlight = this.sendHold.get(id) ?? 0;
     const shown = Math.max(
       0,
       Math.round(snapT + (this.reinforceHold.get(id) ?? 0) + inFlight - (this.pendingDmg.get(id) ?? 0)),
@@ -725,6 +735,7 @@ export class GameView {
     const dt = this.lastTs ? Math.min(0.05, (ts - this.lastTs) / 1000) : 0.016;
     this.lastTs = ts;
     const now = performance.now();
+    // 修复 P0-2: 客户端持续模拟交火,实时扣血
     for (const [id, sg] of this.sieges) {
       sg.acc += dt;
       while (sg.acc >= 0.25 && sg.def > 0 && sg.atk > 0) {
@@ -732,6 +743,7 @@ export class GameView {
         sg.def -= 1;
         sg.atk -= 1;
       }
+      // 修复: 打平时保留防守方1兵,避免空城0
       if (sg.def <= 0 && sg.atk <= 0) {
         sg.def = 1;
         sg.atk = 0;
@@ -778,7 +790,8 @@ export class GameView {
       const px = -uy;
       const py = ux;
       const n = s.trailHeads.length;
-      const cols = s.cols || (n < 10 ? 1 : n < 30 ? 2 : 3);
+      // 修复 P1-8: 队列列数创建时锁定,不随兵力变化
+      const cols = s.cols || 1;
       const alongGap = Math.max(18, dist * 0.08);
       const sideGap = 14;
       const front = s.p * dist;

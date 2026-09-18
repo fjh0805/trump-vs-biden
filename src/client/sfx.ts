@@ -103,9 +103,48 @@ export function sfxClash() {
   tone(220, 0.08, "square", 0.1, 0.02);
 }
 
-/** 破城 shout: formant yell + thump, ~0.45s. */
+/** 原声破城音效库 - 预加载特朗普/拜登语音片段 */
+let captureAudio: HTMLAudioElement[] | null = null;
+let captureIdx = 0;
+
+function loadCaptureVoices() {
+  if (captureAudio) return captureAudio;
+  // 预加载两个阵营的破城原声
+  captureAudio = [
+    new Audio("/assets/sfx-capture-trump.mp3"),
+    new Audio("/assets/sfx-capture-biden.mp3"),
+  ];
+  for (const a of captureAudio) {
+    a.preload = "auto";
+    a.volume = SFX_VOLUME;
+  }
+  return captureAudio;
+}
+
+/** 破城音效 - 使用特朗普/拜登原声,交替播放增加趣味性 */
 export function sfxCapture() {
   resumeSfx();
+  if (muted) return;
+
+  // 优先播放原声,降级到合成音效
+  const voices = loadCaptureVoices();
+  if (voices && voices.length > 0) {
+    const voice = voices[captureIdx % voices.length];
+    captureIdx += 1;
+    voice.currentTime = 0;
+    voice.volume = SFX_VOLUME * 0.9;
+    void voice.play().catch(() => {
+      // 降级到合成音效
+      playSynthCapture();
+    });
+    return;
+  }
+
+  playSynthCapture();
+}
+
+/** 合成破城音效(降级方案): formant yell + thump, ~0.45s. */
+function playSynthCapture() {
   const c = ac();
   if (!c || muted) return;
   const t0 = c.currentTime;
