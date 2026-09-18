@@ -463,8 +463,9 @@ export class GameView {
     if (!info) return;
     const n = this.shownTroops(from, info);
     if (n <= 0) return;
+    // 修复 Bug: 避免重复记录导致翻倍
+    // 只记录一次,不累加到 sendHold (sendHold 会在 upsertStream 时处理)
     this.sendLog.push({ from, n });
-    this.sendHold.set(from, (this.sendHold.get(from) ?? 0) + n);
   }
 
   revertLastSend() {
@@ -476,7 +477,15 @@ export class GameView {
   }
 
   dispatchSend(from: string, to: string) {
-    this.noteSend(from);
+    // 修复 Bug: 出兵时立即从显示的兵力中扣除,避免延迟
+    const info = this.snap?.states[from];
+    if (info) {
+      const n = Math.floor(info.troops ?? 0);
+      if (n > 0) {
+        // 立即设置 sendHold,让数字马上下降
+        this.sendHold.set(from, (this.sendHold.get(from) ?? 0) + n);
+      }
+    }
     this.onSend(from, to, 1);
   }
 
@@ -552,6 +561,10 @@ export class GameView {
         const next = held - take;
         if (next > 0) this.sendHold.set(a.from, next);
         else this.sendHold.delete(a.from);
+      }
+      // 修复 Bug: 如果 sendHold 为 0,也删除避免阻塞产兵显示
+      if ((this.sendHold.get(a.from) ?? 0) === 0) {
+        this.sendHold.delete(a.from);
       }
     }
     s.from = a.from;
