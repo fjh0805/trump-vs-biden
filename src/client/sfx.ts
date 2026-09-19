@@ -1,6 +1,6 @@
 /** Web-Audio SFX. Default unmuted. Must resume AudioContext on a user gesture. */
 
-const SFX_VOLUME = 0.55;
+const SFX_VOLUME = 0.85;
 const MUTE_KEY = "tdbd-sfx-muted";
 
 let ctx: AudioContext | null = null;
@@ -110,7 +110,6 @@ let bidenVoices: HTMLAudioElement[] | null = null;
 function loadTrumpVoices() {
   if (trumpVoices) return trumpVoices;
   trumpVoices = [
-    new Audio("/assets/sfx-capture-trump.mp3"),   // Wrong
     new Audio("/assets/sfx-capture-trump-2.mp3"), // MAGA
     new Audio("/assets/sfx-capture-trump-3.mp3"), // We're gonna win
   ];
