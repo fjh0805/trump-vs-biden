@@ -492,16 +492,21 @@ export class GameView {
   private shownTroops(id: string, info: { troops?: number } | undefined): number {
     const snapT = info?.troops ?? 0;
     const sg = this.sieges.get(id);
-    // 修复 P0-3: 占领时显示剩余攻击兵力,消除闪0
+
     if (sg && sg.def > 0) return Math.max(0, Math.ceil(sg.def));
     if (sg && sg.atk > 0) return Math.max(1, Math.ceil(sg.atk));
-    // 修复: 打平时确保至少显示1兵
-    if (sg && sg.def <= 0 && sg.atk <= 0) return 1;
+
+    // 修复: 打平时清理siege,返回服务器兵力
+    if (sg && sg.def <= 0 && sg.atk <= 0) {
+      this.sieges.delete(id);
+      this.captureHold.delete(id);
+      return Math.max(1, Math.ceil(snapT));
+    }
+
     const hold = this.captureHold.get(id);
     if (hold && snapT <= 0) return hold;
     if (hold && snapT > 0) this.captureHold.delete(id);
-    // 修复 P0-4: 避免重复计算 sendHold 和 streams 的兵力
-    // sendHold 只在出兵瞬间记录,upsertStream 时扣除,不在这里累加
+
     const inFlight = this.sendHold.get(id) ?? 0;
     const shown = Math.max(
       0,
@@ -756,12 +761,14 @@ export class GameView {
         sg.def -= 1;
         sg.atk -= 1;
       }
-      // 修复: 打平时保留防守方1兵,避免空城0
-      if (sg.def <= 0 && sg.atk <= 0) {
-        sg.def = 1;
-        sg.atk = 0;
+      // 修复: 攻击方胜利时标记预期占领者
+      if (sg.def <= 0 && sg.atk > 0) {
+        this.pendingOwner.set(id, sg.faction);
       }
-      if (sg.def <= 0 && sg.atk > 0) this.pendingOwner.set(id, sg.faction);
+      // 修复: 打平时清理本地模拟,让服务器快照决定
+      if (sg.def <= 0 && sg.atk <= 0) {
+        this.sieges.delete(id);
+      }
     }
     for (const s of [...this.streams.values()]) {
       s.p = Math.max(0, Math.min(1, (now - s.start) / s.duration));
