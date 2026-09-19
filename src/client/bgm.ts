@@ -14,7 +14,7 @@ export type BgmTrackId = keyof typeof BGM_TRACKS;
 
 let audio: HTMLAudioElement | null = null;
 let started = false;
-let trackId: BgmTrackId = "march";
+let trackId: BgmTrackId = "ymca";
 
 function muted(): boolean {
   try {
@@ -39,7 +39,7 @@ function loadTrackPref(): BgmTrackId {
   } catch {
     /* ignore */
   }
-  return "march";
+  return "ymca";
 }
 
 function saveTrackPref(id: BgmTrackId) {
