@@ -143,7 +143,9 @@ export function sfxCapture(faction?: "trump" | "biden") {
     // 随机选择一个音频
     const voice = voices[Math.floor(Math.random() * voices.length)];
     voice.currentTime = 0;
-    voice.volume = SFX_VOLUME * 0.9;
+    // MAGA是第一个音频,单独提升音量
+    const isMaga = faction !== "biden" && voice === voices[0];
+    voice.volume = isMaga ? 1.0 : SFX_VOLUME * 0.9;
     void voice.play().catch(() => {
       // 降级到合成音效
       playSynthCapture();

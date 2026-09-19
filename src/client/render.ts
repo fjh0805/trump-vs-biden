@@ -493,18 +493,42 @@ export class GameView {
     const snapT = info?.troops ?? 0;
     const sg = this.sieges.get(id);
 
-    if (sg && sg.def > 0) return Math.max(0, Math.ceil(sg.def));
-    if (sg && sg.atk > 0) return Math.max(1, Math.ceil(sg.atk));
+    // 调试日志
+    const debug = id === 'FL' || id === 'LA' || id === 'TX' || id === 'OK';
+    if (debug) {
+      console.log(`[${id}] shownTroops:`, {
+        snapT,
+        sg: sg ? { def: sg.def, atk: sg.atk, faction: sg.faction } : null,
+        captureHold: this.captureHold.get(id),
+        sendHold: this.sendHold.get(id),
+        reinforceHold: this.reinforceHold.get(id),
+        pendingDmg: this.pendingDmg.get(id),
+      });
+    }
+
+    if (sg && sg.def > 0) {
+      if (debug) console.log(`[${id}] 返回 sg.def:`, Math.max(0, Math.ceil(sg.def)));
+      return Math.max(0, Math.ceil(sg.def));
+    }
+    if (sg && sg.atk > 0) {
+      if (debug) console.log(`[${id}] 返回 sg.atk:`, Math.max(1, Math.ceil(sg.atk)));
+      return Math.max(1, Math.ceil(sg.atk));
+    }
 
     // 修复: 打平时清理siege,返回服务器兵力
     if (sg && sg.def <= 0 && sg.atk <= 0) {
       this.sieges.delete(id);
       this.captureHold.delete(id);
-      return Math.max(1, Math.ceil(snapT));
+      const result = Math.max(1, Math.ceil(snapT));
+      if (debug) console.log(`[${id}] 打平分支，返回:`, result, 'snapT:', snapT);
+      return result;
     }
 
     const hold = this.captureHold.get(id);
-    if (hold && snapT <= 0) return hold;
+    if (hold && snapT <= 0) {
+      if (debug) console.log(`[${id}] 返回 captureHold:`, hold);
+      return hold;
+    }
     if (hold && snapT > 0) this.captureHold.delete(id);
 
     const inFlight = this.sendHold.get(id) ?? 0;
@@ -512,6 +536,7 @@ export class GameView {
       0,
       Math.round(snapT + (this.reinforceHold.get(id) ?? 0) + inFlight - (this.pendingDmg.get(id) ?? 0)),
     );
+    if (debug) console.log(`[${id}] 最终计算:`, shown, '= snapT:', snapT, '+ reinforce:', this.reinforceHold.get(id) ?? 0, '+ inFlight:', inFlight, '- pending:', this.pendingDmg.get(id) ?? 0);
     return shown;
   }
 
