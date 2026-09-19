@@ -725,7 +725,7 @@ export class GameView {
         }
       }
       if (e.kind === "capture") {
-        sfxCapture();
+        sfxCapture(e.faction);
         this.svg.getElementById(`st-${e.state}`)?.classList.add("flash");
       }
     }
