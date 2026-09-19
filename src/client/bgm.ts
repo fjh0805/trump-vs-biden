@@ -3,11 +3,11 @@ import { resumeSfx } from "./sfx";
 const MUTE_KEY = "tdbd-bgm-muted";
 const TRACK_KEY = "tdbd-bgm-track";
 
-/** Built-in public-domain marches + MEGA rally theme. */
+/** Built-in public-domain marches + YMCA rally theme. */
 export const BGM_TRACKS = {
   march: { id: "march", label: "进行曲", src: "/assets/bgm.mp3" },
   charge: { id: "charge", label: "冲击", src: "/assets/bgm-charge.mp3" },
-  mega: { id: "mega", label: "MEGA", src: "/assets/bgm-mega.mp3" },
+  ymca: { id: "ymca", label: "YMCA", src: "/assets/bgm-ymca.mp3" },
 } as const;
 
 export type BgmTrackId = keyof typeof BGM_TRACKS;

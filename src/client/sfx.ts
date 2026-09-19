@@ -104,33 +104,46 @@ export function sfxClash() {
 }
 
 /** 原声破城音效库 - 预加载特朗普/拜登语音片段 */
-let captureAudio: HTMLAudioElement[] | null = null;
-let captureIdx = 0;
+let trumpVoices: HTMLAudioElement[] | null = null;
+let bidenVoices: HTMLAudioElement[] | null = null;
 
-function loadCaptureVoices() {
-  if (captureAudio) return captureAudio;
-  // 预加载两个阵营的破城原声
-  captureAudio = [
-    new Audio("/assets/sfx-capture-trump.mp3"),
-    new Audio("/assets/sfx-capture-biden.mp3"),
+function loadTrumpVoices() {
+  if (trumpVoices) return trumpVoices;
+  trumpVoices = [
+    new Audio("/assets/sfx-capture-trump.mp3"),   // Wrong
+    new Audio("/assets/sfx-capture-trump-2.mp3"), // MAGA
+    new Audio("/assets/sfx-capture-trump-3.mp3"), // We're gonna win
   ];
-  for (const a of captureAudio) {
+  for (const a of trumpVoices) {
     a.preload = "auto";
     a.volume = SFX_VOLUME;
   }
-  return captureAudio;
+  return trumpVoices;
 }
 
-/** 破城音效 - 使用特朗普/拜登原声,交替播放增加趣味性 */
-export function sfxCapture() {
+function loadBidenVoices() {
+  if (bidenVoices) return bidenVoices;
+  bidenVoices = [
+    new Audio("/assets/sfx-capture-biden.mp3"),   // Come on man
+    new Audio("/assets/sfx-capture-biden-2.mp3"), // Gets it done
+  ];
+  for (const a of bidenVoices) {
+    a.preload = "auto";
+    a.volume = SFX_VOLUME;
+  }
+  return bidenVoices;
+}
+
+/** 破城音效 - 根据阵营随机播放原声 */
+export function sfxCapture(faction?: "trump" | "biden") {
   resumeSfx();
   if (muted) return;
 
-  // 优先播放原声,降级到合成音效
-  const voices = loadCaptureVoices();
+  // 根据阵营选择音频池
+  const voices = faction === "biden" ? loadBidenVoices() : loadTrumpVoices();
   if (voices && voices.length > 0) {
-    const voice = voices[captureIdx % voices.length];
-    captureIdx += 1;
+    // 随机选择一个音频
+    const voice = voices[Math.floor(Math.random() * voices.length)];
     voice.currentTime = 0;
     voice.volume = SFX_VOLUME * 0.9;
     void voice.play().catch(() => {
