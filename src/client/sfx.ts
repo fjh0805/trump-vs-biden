@@ -109,14 +109,13 @@ let bidenVoices: HTMLAudioElement[] | null = null;
 
 function loadTrumpVoices() {
   if (trumpVoices) return trumpVoices;
-  trumpVoices = [
-    new Audio("/assets/sfx-capture-trump-2.mp3"), // MAGA
-    new Audio("/assets/sfx-capture-trump-3.mp3"), // We're gonna win
-  ];
-  for (const a of trumpVoices) {
-    a.preload = "auto";
-    a.volume = SFX_VOLUME;
-  }
+  const maga = new Audio("/assets/sfx-capture-trump-2.mp3");
+  const win = new Audio("/assets/sfx-capture-trump-3.mp3");
+  maga.preload = "auto";
+  maga.volume = 1.0; // MAGA音量调到最大
+  win.preload = "auto";
+  win.volume = SFX_VOLUME;
+  trumpVoices = [maga, win];
   return trumpVoices;
 }
 
