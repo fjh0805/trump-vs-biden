@@ -332,12 +332,12 @@ export class GameView {
       const predF = this.pendingOwner.get(s.id);
       const confirmed = !!(predF && info.faction === predF);
       if (confirmed) {
-        const leftover = this.sieges.get(s.id)?.atk ?? this.captureHold.get(s.id) ?? 0;
+        // 占领确认时,服务器已经将剩余兵力写入 info.troops
+        // 清理本地模拟状态,直接使用服务器数据
         this.pendingDmg.set(s.id, 0);
         this.pendingOwner.delete(s.id);
         this.sieges.delete(s.id);
-        if ((info.troops ?? 0) <= 0 && leftover > 0) this.captureHold.set(s.id, leftover);
-        else this.captureHold.delete(s.id);
+        this.captureHold.delete(s.id);
       }
       const sg = this.sieges.get(s.id);
       let faction = info.faction;
