@@ -532,11 +532,17 @@ export class GameView {
     if (hold && snapT > 0) this.captureHold.delete(id);
 
     const inFlight = this.sendHold.get(id) ?? 0;
-    const shown = Math.max(
-      0,
-      Math.round(snapT + (this.reinforceHold.get(id) ?? 0) + inFlight - (this.pendingDmg.get(id) ?? 0)),
-    );
-    if (debug) console.log(`[${id}] 最终计算:`, shown, '= snapT:', snapT, '+ reinforce:', this.reinforceHold.get(id) ?? 0, '+ inFlight:', inFlight, '- pending:', this.pendingDmg.get(id) ?? 0);
+    const base = snapT + (this.reinforceHold.get(id) ?? 0) + inFlight;
+    const pending = this.pendingDmg.get(id) ?? 0;
+
+    // 修复0兵bug: 如果pendingDmg超过实际可用兵力,自动校准防止负数
+    if (pending > base && base >= 0) {
+      if (debug) console.log(`[${id}] ⚠️ pendingDmg过大(${pending} > ${base}),自动校准`);
+      this.pendingDmg.set(id, Math.max(0, base));
+    }
+
+    const shown = Math.max(0, Math.round(base - (this.pendingDmg.get(id) ?? 0)));
+    if (debug) console.log(`[${id}] 最终计算:`, shown, '= base:', base, '- pending:', this.pendingDmg.get(id) ?? 0);
     return shown;
   }
 
