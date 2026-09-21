@@ -1,4 +1,5 @@
-const TAP_PX = 8;
+// 修复手机端bug: 提升点击移动阈值,避免轻微抖动被识别为拖动
+const TAP_PX = 12;
 const DBL_MS = 300;
 
 export class MapCamera {

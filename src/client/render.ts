@@ -116,11 +116,13 @@ export class GameView {
       const b = path.getBBox();
       const m = Math.min(b.width, b.height);
       if (m >= 32) continue;
+      // 修复手机端bug: 扩大小州点击区域,手指触控更友好
+      const hitRadius = m < 18 ? 24 : 20;
       const pad = el("circle", {
         class: "hit",
         cx: String(s.cx),
         cy: String(s.cy),
-        r: String(m < 18 ? 18 : 14),
+        r: String(hitRadius),
       });
       pad.dataset.state = s.id;
       hits.appendChild(pad);
@@ -307,7 +309,8 @@ export class GameView {
     const oy = (vh - 600 * contain) / 2;
     const cam = this.camera;
     let best = "";
-    let bestD = 28;
+    // 修复手机端bug: 扩大nearestState查找半径,手指粗点也能准确识别
+    let bestD = 45;
     for (const s of Object.values(MAP.states)) {
       const sx = cam.x + (ox + s.cx * contain) * cam.scale;
       const sy = cam.y + (oy + s.cy * contain) * cam.scale;
@@ -878,7 +881,8 @@ export class GameView {
         }
         const x = a.cx + ux * along + px * side;
         const y = a.cy + uy * along + py * side;
-        th.setAttribute("opacity", "0.92");
+        // 修复手机端bug: 提升头像不透明度,强光下更清晰
+        th.setAttribute("opacity", "0.96");
         th.setAttribute("transform", `translate(${x},${y})`);
       }
     }
