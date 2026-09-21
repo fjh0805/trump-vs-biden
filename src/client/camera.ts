@@ -24,6 +24,9 @@ export class MapCamera {
     private viewport: HTMLElement,
     private world: HTMLElement,
   ) {
+    // 修复手机端bug: 添加touch-action防止浏览器默认手势干扰
+    viewport.style.touchAction = "none";
+
     viewport.addEventListener("pointerdown", this.onDown, { passive: false });
     viewport.addEventListener("pointermove", this.onMove, { passive: false });
     viewport.addEventListener("pointerup", this.onUp);

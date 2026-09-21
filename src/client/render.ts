@@ -169,6 +169,12 @@ export class GameView {
   private selectStart(cx: number, cy: number): boolean {
     const id = this.hitState(cx, cy);
     if (!id || !this.isOwnControllable(id)) return false;
+
+    // 修复手机端bug: 如果当前是捏合缩放状态,不启动出兵选择
+    if (this.camera && this.camera['pointers'] && this.camera['pointers'].size >= 2) {
+      return false;
+    }
+
     this.dragging = true;
     this.dragStartedSelected = this.selected === id && this.origins.has(id);
     this.origins = new Set([id]);
@@ -589,16 +595,50 @@ export class GameView {
   }
 
   private ensureHeads(s: Stream, n: number) {
-    const size = 11;
+    const size = 14; // 提升到14px,手机端更清晰
     while (s.trailHeads.length < n) {
       const g = el("g", { class: "trail-head-wrap", opacity: "0" });
-      const wrap = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
-      wrap.setAttribute("x", String(-size / 2));
-      wrap.setAttribute("y", String(-size / 2));
-      wrap.setAttribute("width", String(size));
-      wrap.setAttribute("height", String(size));
-      wrap.innerHTML = `<div xmlns="http://www.w3.org/1999/xhtml" class="army-head trail-head">${headFor(s.faction, size)}</div>`;
-      g.appendChild(wrap);
+
+      // 修复移动端bug: 不使用foreignObject+img,改用SVG circle+image避免兼容性问题
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", "0");
+      circle.setAttribute("cy", "0");
+      circle.setAttribute("r", String(size / 2));
+      circle.setAttribute("fill", s.faction === "trump" ? "#c23b22" : "#2f5d9f");
+      circle.setAttribute("class", "army-head-bg");
+
+      const img = document.createElementNS("http://www.w3.org/2000/svg", "image");
+      img.setAttribute("x", String(-size / 2));
+      img.setAttribute("y", String(-size / 2));
+      img.setAttribute("width", String(size));
+      img.setAttribute("height", String(size));
+      img.setAttribute("href", s.faction === "trump" ? "/trump.jpg" : "/biden.jpg");
+      img.setAttribute("clip-path", `circle(${size / 2}px at center)`);
+      img.setAttribute("class", "army-head-img");
+
+      // 降级方案: 如果图片加载失败,显示首字母
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", "0");
+      text.setAttribute("y", "0");
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("dominant-baseline", "central");
+      text.setAttribute("fill", "white");
+      text.setAttribute("font-size", String(size * 0.6));
+      text.setAttribute("font-weight", "bold");
+      text.setAttribute("class", "army-head-fallback");
+      text.setAttribute("style", "display: none;");
+      text.textContent = s.faction === "trump" ? "T" : "B";
+
+      g.appendChild(circle);
+      g.appendChild(img);
+      g.appendChild(text);
+
+      // 图片加载失败时显示降级文字
+      img.addEventListener("error", () => {
+        img.style.display = "none";
+        text.style.display = "block";
+      });
+
       s.root.appendChild(g);
       s.trailHeads.push(g);
     }
