@@ -486,16 +486,21 @@ export class GameView {
   }
 
   dispatchSend(from: string, to: string) {
-    // 修复 Bug: 出兵时立即从显示的兵力中扣除,避免延迟
+    // 修复严重bug: 出兵时应该用shownTroops获取实际可出兵数,而不是服务器快照
     const info = this.snap?.states[from];
-    if (info) {
-      const n = Math.floor(info.troops ?? 0);
-      if (n > 0) {
-        // 立即设置 sendHold,让数字马上下降
-        this.sendHold.set(from, (this.sendHold.get(from) ?? 0) + n);
-      }
-    }
-    this.onSend(from, to, 1);
+    if (!info) return;
+
+    const actualTroops = this.shownTroops(from, info);
+    if (actualTroops <= 0) return;
+
+    // 根据当前ratio计算实际出兵数
+    const sendCount = Math.floor(actualTroops * this.ratio);
+    if (sendCount <= 0) return;
+
+    // 立即从显示中扣除,避免延迟感
+    this.sendHold.set(from, (this.sendHold.get(from) ?? 0) + sendCount);
+
+    this.onSend(from, to, this.ratio);
   }
 
   private shownTroops(id: string, info: { troops?: number | null } | undefined): number {
@@ -522,8 +527,9 @@ export class GameView {
     }
     if (hold && snapT > 0) this.captureHold.delete(id);
 
-    const inFlight = this.sendHold.get(id) ?? 0;
-    const base = snapT + (this.reinforceHold.get(id) ?? 0) + inFlight;
+    // 修复严重bug: sendHold是已扣除的兵力,应该减去而不是加上
+    const outgoing = this.sendHold.get(id) ?? 0;
+    const base = snapT + (this.reinforceHold.get(id) ?? 0) - outgoing;
     const pending = this.pendingDmg.get(id) ?? 0;
 
     // 修复0兵bug: 如果pendingDmg超过实际可用兵力,自动校准防止负数
@@ -580,16 +586,15 @@ export class GameView {
       this.ensureHeads(s, n0);
       this.armyLayer.appendChild(root);
       this.streams.set(a.id, s);
+
+      // 修复严重bug: 服务器返回的army已经是扣除后的,不需要再从sendHold扣除
+      // 只需要清理本地预测的sendHold,避免重复扣除
       const held = this.sendHold.get(a.from) ?? 0;
-      const take = Math.min(held, Math.floor(a.troops));
-      if (take > 0) {
-        const next = held - take;
+      if (held > 0) {
+        const consumed = Math.min(held, Math.floor(a.troops));
+        const next = held - consumed;
         if (next > 0) this.sendHold.set(a.from, next);
         else this.sendHold.delete(a.from);
-      }
-      // 修复 Bug: 如果 sendHold 为 0,也删除避免阻塞产兵显示
-      if ((this.sendHold.get(a.from) ?? 0) === 0) {
-        this.sendHold.delete(a.from);
       }
     }
     s.from = a.from;
