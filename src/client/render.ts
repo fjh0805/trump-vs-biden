@@ -1,5 +1,5 @@
 import { BALANCE } from "../shared/balance";
-import { controlBank, labelEn, labelZh } from "../shared/constants";
+import { controlBank, labelEn, labelZh, armyTravelSeconds } from "../shared/constants";
 import type { ArmyView, GameEvent, RoomSnapshot } from "../shared/protocol";
 import mapJson from "../shared/us-map.json";
 import { headFor } from "./avatars";
@@ -489,29 +489,14 @@ export class GameView {
     this.onSend(from, to, 1);
   }
 
-  private shownTroops(id: string, info: { troops?: number } | undefined): number {
+  private shownTroops(id: string, info: { troops?: number | null } | undefined): number {
     const snapT = info?.troops ?? 0;
     const sg = this.sieges.get(id);
 
-    // 调试日志
-    const debug = id === 'FL' || id === 'LA' || id === 'TX' || id === 'OK';
-    if (debug) {
-      console.log(`[${id}] shownTroops:`, {
-        snapT,
-        sg: sg ? { def: sg.def, atk: sg.atk, faction: sg.faction } : null,
-        captureHold: this.captureHold.get(id),
-        sendHold: this.sendHold.get(id),
-        reinforceHold: this.reinforceHold.get(id),
-        pendingDmg: this.pendingDmg.get(id),
-      });
-    }
-
     if (sg && sg.def > 0) {
-      if (debug) console.log(`[${id}] 返回 sg.def:`, Math.max(0, Math.ceil(sg.def)));
       return Math.max(0, Math.ceil(sg.def));
     }
     if (sg && sg.atk > 0) {
-      if (debug) console.log(`[${id}] 返回 sg.atk:`, Math.max(1, Math.ceil(sg.atk)));
       return Math.max(1, Math.ceil(sg.atk));
     }
 
@@ -519,14 +504,11 @@ export class GameView {
     if (sg && sg.def <= 0 && sg.atk <= 0) {
       this.sieges.delete(id);
       this.captureHold.delete(id);
-      const result = Math.max(1, Math.ceil(snapT));
-      if (debug) console.log(`[${id}] 打平分支，返回:`, result, 'snapT:', snapT);
-      return result;
+      return Math.max(1, Math.ceil(snapT));
     }
 
     const hold = this.captureHold.get(id);
     if (hold && snapT <= 0) {
-      if (debug) console.log(`[${id}] 返回 captureHold:`, hold);
       return hold;
     }
     if (hold && snapT > 0) this.captureHold.delete(id);
@@ -537,12 +519,10 @@ export class GameView {
 
     // 修复0兵bug: 如果pendingDmg超过实际可用兵力,自动校准防止负数
     if (pending > base && base >= 0) {
-      if (debug) console.log(`[${id}] ⚠️ pendingDmg过大(${pending} > ${base}),自动校准`);
       this.pendingDmg.set(id, Math.max(0, base));
     }
 
     const shown = Math.max(0, Math.round(base - (this.pendingDmg.get(id) ?? 0)));
-    if (debug) console.log(`[${id}] 最终计算:`, shown, '= base:', base, '- pending:', this.pendingDmg.get(id) ?? 0);
     return shown;
   }
 
@@ -911,7 +891,7 @@ function durationMs(from: string, to: string) {
   const b = MAP.states[to];
   if (!a || !b) return 2000;
   const dist = Math.hypot(b.cx - a.cx, b.cy - a.cy);
-  const seconds = Math.min(6.8, Math.max(2.2, dist / 90));
+  const seconds = armyTravelSeconds(dist);
   return seconds * 1000;
 }
 

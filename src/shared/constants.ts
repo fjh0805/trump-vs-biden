@@ -76,6 +76,11 @@ export function resolveHome(faction: Faction, pick: string, zone?: Zone): HomeId
   return list[Math.floor(Math.random() * list.length)];
 }
 
+/** 统一的行军时长计算(秒) - 客户端和服务端共用 */
+export function armyTravelSeconds(distanceInMapUnits: number): number {
+  return Math.min(4.6, Math.max(1.15, distanceInMapUnits / 140));
+}
+
 export const ADJACENT: Record<string, string[]> = {
   AL: ["MS", "TN", "GA", "FL"],
   AZ: ["CA", "NV", "UT", "CO", "NM"],

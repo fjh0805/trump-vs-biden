@@ -76,6 +76,8 @@ export class GameRoom extends DurableObject<Env> {
     }
     await this.save(state);
     this.broadcast();
+    // 通知其他玩家该玩家的语音状态变化
+    this.sendPeerLists();
     const alarm = await this.ctx.storage.getAlarm();
     if (!alarm) await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
   }

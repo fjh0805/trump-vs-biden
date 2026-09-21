@@ -10,6 +10,7 @@ import {
   controlBank,
   homesInBank,
   resolveHome,
+  armyTravelSeconds,
 } from "../src/shared/constants";
 import { neutralTroops } from "../src/shared/map-area";
 import type { Faction, HomeId, Mode, Zone } from "../src/shared/constants";
@@ -148,7 +149,7 @@ export function sendArmy(state: RoomState, playerId: string, from: string, to: s
   const a = MAP.states[from];
   const b = MAP.states[to];
   const dist = Math.hypot(b.cx - a.cx, b.cy - a.cy);
-  const seconds = Math.min(4.6, Math.max(1.15, dist / 140));
+  const seconds = armyTravelSeconds(dist);
   const army: Army = {
     id: `a${state.armySeq++}`,
     ownerId: playerId,

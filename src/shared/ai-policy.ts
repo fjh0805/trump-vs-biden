@@ -100,7 +100,22 @@ function pickDefend(
   const donors = myStates
     .filter((s) => s.id !== target.id && s.troops >= BALANCE.RICH_MIN_TROOPS)
     .sort((a, b) => b.troops - a.troops);
-  if (donors.length === 0) return null;
+
+  // 兜底策略: 如果没有富裕州,从兵力最多的州支援(即使低于阈值)
+  if (donors.length === 0) {
+    const fallbackDonors = myStates
+      .filter((s) => s.id !== target.id && s.troops >= 2)
+      .sort((a, b) => b.troops - a.troops);
+    if (fallbackDonors.length === 0) return null;
+    const donor = fallbackDonors[0];
+    return {
+      intent: "defend",
+      from: donor.id,
+      to: target.id,
+      sendRatio: BALANCE.DEFEND_SEND_RATIO,
+      reason: `emergency defend ${target.id} vs pressure (fallback)`,
+    };
+  }
 
   const adjacentDonor =
     donors.find((d) => (ctx.neighbors[d.id] ?? []).includes(target.id)) ?? donors[0];
