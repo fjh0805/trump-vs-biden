@@ -4,7 +4,6 @@ import type { Faction, HomeId, Mode } from "../shared/constants";
 import { pickLine } from "../shared/banter";
 import type { RoomSnapshot, ServerToClient } from "../shared/protocol";
 import { COPY } from "../shared/copy";
-import { VOICE_CHIPS } from "../shared/voice-chips";
 import { headFor } from "./avatars";
 import { createRoomCode, RoomSocket } from "./net";
 import { linesForEnd, pushRadio } from "./radio";
@@ -125,30 +124,7 @@ btnHud.onclick = () => setSheet(!sheet.classList.contains("open"));
 sheetBg.onclick = () => setSheet(false);
 $("sheet-handle").onclick = () => setSheet(!sheet.classList.contains("open"));
 
-let chipsOn = true;
-const chipsBox = $("chips");
-chipsBox.innerHTML = VOICE_CHIPS.map(
-  (c) => `<button type="button" data-group="${c.group}" data-text="${c.text}">${c.text}</button>`,
-).join("");
-chipsBox.querySelectorAll("button").forEach((b) => {
-  b.addEventListener("click", () => {
-    const text = (b as HTMLElement).dataset.text ?? "";
-    if (!text) return;
-    sock.send({ type: "chat", text });
-  });
-});
-function setChips(on: boolean) {
-  chipsOn = on;
-  const vis = on && snap?.phase === "playing";
-  chipsBox.classList.toggle("show", vis);
-  chipsBox.hidden = !vis;
-  $("play").classList.toggle("chips-on", vis);
-  $("btn-chips").setAttribute("aria-pressed", on ? "true" : "false");
-  $("btn-chips").classList.toggle("muted", !on);
-}
-$("btn-chips").onclick = () => setChips(!chipsOn);
-setChips(true);
-
+// 喊话功能已删除
 
 sock.onMessage = onServer;
 sock.onClose = () => toast("连接断开，尝试刷新后重新加入");
@@ -271,7 +247,6 @@ function paint(s: RoomSnapshot) {
   if (was !== s.phase) setSheet(s.phase === "lobby");
   if (s.phase === "playing") maybeShowTutorial();
   else hideTutorial();
-  setChips(chipsOn);
   const me = s.players.find((p) => p.id === s.you);
   narrate(s, me?.faction ?? "trump", was);
   const ov = $("result");

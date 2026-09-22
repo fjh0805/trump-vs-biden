@@ -374,24 +374,20 @@ export class GameView {
       const isOrigin = this.origins.has(s.id) || this.selected === s.id;
       const snapT = info.troops ?? 0;
       const prevT = this.lastSnapTroops.get(s.id);
+
+      // 修复严重bug: 删除render中的sendHold清理逻辑,避免与upsertStream双重清理
+      // sendHold只在upsertStream中精确清理(收到army时)
       if (prevT != null && snapT < prevT) {
         const pend = this.pendingDmg.get(s.id) ?? 0;
         this.pendingDmg.set(s.id, Math.max(0, pend - (prevT - snapT)));
-        // 修复 P0-4: 渐进式清理 sendHold,避免粗暴覆盖导致数字跳动
-        const loss = prevT - snapT;
-        const held = this.sendHold.get(s.id) ?? 0;
-        if (held > 0) {
-          const cleared = Math.min(held, loss);
-          const next = held - cleared;
-          if (next > 0) this.sendHold.set(s.id, next);
-          else this.sendHold.delete(s.id);
-        }
       }
+
       if (prevT != null && snapT > prevT) {
         const add = snapT - prevT;
         const rh = this.reinforceHold.get(s.id) ?? 0;
         if (rh > 0) this.reinforceHold.set(s.id, Math.max(0, rh - add));
       }
+
       // 修复 P0-6: 老家从0恢复产兵时,清理状态让数字正常增长
       if (prevT === 0 && snapT > 0) {
         this.pendingDmg.set(s.id, 0);
