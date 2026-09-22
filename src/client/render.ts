@@ -385,13 +385,20 @@ export class GameView {
       if (prevT != null && snapT > prevT) {
         const add = snapT - prevT;
         const rh = this.reinforceHold.get(s.id) ?? 0;
-        if (rh > 0) this.reinforceHold.set(s.id, Math.max(0, rh - add));
+        if (rh > 0) {
+          // 修复严重bug: reinforceHold精确清理,避免累积导致数字虚高
+          const cleared = Math.min(rh, add);
+          const next = rh - cleared;
+          if (next > 0) this.reinforceHold.set(s.id, next);
+          else this.reinforceHold.delete(s.id);
+        }
       }
 
-      // 修复 P0-6: 老家从0恢复产兵时,清理状态让数字正常增长
+      // 修复 P0-6: 老家从0恢复产兵时,清理所有状态让数字正常增长
       if (prevT === 0 && snapT > 0) {
         this.pendingDmg.set(s.id, 0);
         this.sendHold.delete(s.id);
+        this.reinforceHold.delete(s.id);
       }
       this.lastSnapTroops.set(s.id, snapT);
       let shown = this.shownTroops(s.id, info);
