@@ -309,14 +309,27 @@ function resolveSieges(state: RoomState, events: GameEvent[], strike: boolean) {
     if (!dest) continue;
     const destFaction = factionOf(state, dest.ownerId);
     const assault: Army[] = [];
+    const reinforce: Army[] = [];
+
     for (const army of armies) {
-      if (dest.ownerId === army.ownerId || destFaction === army.faction) {
-        dest.troops = dest.troops + army.troops;
-        if (!dest.ownerId) dest.ownerId = assignOwner(state, army.ownerId, army.to);
-        continue;
+      // 修复体验问题: 进攻中立州也要战斗,不能直接占领
+      const isNeutral = !dest.ownerId;
+      const isFriendly = dest.ownerId === army.ownerId || destFaction === army.faction;
+
+      if (isFriendly && !isNeutral) {
+        // 只有非中立的友方领土才能直接增援
+        reinforce.push(army);
+      } else {
+        // 中立州和敌方领土都需要战斗
+        assault.push(army);
       }
-      assault.push(army);
     }
+
+    // 先处理增援
+    for (const army of reinforce) {
+      dest.troops = dest.troops + army.troops;
+    }
+
     if (!assault.length) continue;
 
     const meta = MAP.states[to];

@@ -179,7 +179,15 @@ export class GameView {
 
     this.dragging = true;
     this.dragStartedSelected = this.selected === id && this.origins.has(id);
-    this.origins = new Set([id]);
+
+    // 修复合兵功能: 如果已有起点且点击新的己方州,累积而不是重置
+    if (this.origins.size > 0 && !this.origins.has(id)) {
+      this.origins.add(id);
+    } else if (this.origins.size === 0) {
+      this.origins = new Set([id]);
+    }
+    // 如果点击已选中的州,保持origins不变(允许重新拖动)
+
     this.selected = id;
     this.dragTarget = null;
     this.dragPointer = this.clientToSvg(cx, cy);
