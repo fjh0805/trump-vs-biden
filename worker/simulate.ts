@@ -341,6 +341,9 @@ function resolveSieges(state: RoomState, events: GameEvent[], strike: boolean) {
       // 攻击方胜利: 扣除守军后占领
       const survivors = atkTotal - defTotal;
       captureWith(state, dest, to, assault, survivors, events);
+    } else if (atkTotal === defTotal) {
+      // 打平: 攻击方以1兵占领（付出全部代价）
+      captureWith(state, dest, to, assault, 1, events);
     } else {
       // 守军胜利: 攻击方全歼,守军扣除攻击兵力
       dest.troops = Math.max(0, defTotal - atkTotal);
