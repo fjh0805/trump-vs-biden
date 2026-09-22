@@ -729,6 +729,8 @@ export class GameView {
     const snap = this.snap;
     if (!snap || snap.phase !== "playing") return;
     const info = snap.states[id];
+
+    // 点击已选中的州 → 取消选择
     if (this.selected === id) {
       this.selected = null;
       this.origins.clear();
@@ -736,6 +738,8 @@ export class GameView {
       this.refreshPick();
       return;
     }
+
+    // 点击目标州 → 出兵
     if (this.selected && this.selected !== id && info?.visible) {
       const froms = this.origins.size ? [...this.origins] : [this.selected];
       for (const from of froms) {
@@ -743,9 +747,13 @@ export class GameView {
         this.dispatchSend(from, id);
       }
       this.dragTarget = null;
+      // 修复合兵功能: 出兵后不清空origins,支持连续操作
+      // this.origins.clear();
       this.refreshPick();
       return;
     }
+
+    // 点击己方州 → 累积到origins
     if (info?.visible && info.ownerId === snap.you) {
       const me = snap.players.find((p) => p.id === snap.you);
       if (snap.mode === "2v2" && me && controlBank(id) !== me.zone) {
@@ -754,8 +762,15 @@ export class GameView {
         this.refreshPick();
         return;
       }
+
+      // 修复合兵功能: 连续点击己方州时累积,而不是重置
+      if (this.origins.size > 0) {
+        this.origins.add(id);  // 累积
+      } else {
+        this.origins = new Set([id]);  // 首次选择
+      }
+
       this.selected = id;
-      this.origins = new Set([id]);
       this.tip(id);
       this.refreshPick();
     } else {
