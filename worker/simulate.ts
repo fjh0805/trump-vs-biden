@@ -334,18 +334,17 @@ function resolveSieges(state: RoomState, events: GameEvent[], strike: boolean) {
 
     const meta = MAP.states[to];
     const atkTotal = assault.reduce((sum, a) => sum + a.troops, 0);
+    const defTotal = dest.troops;
 
-    // 修复战斗结算bug: 必须守军<=0才能占领,而不是攻击方>=守军就占领
-    // 战斗过程中持续互相消耗,直到一方归零
-    if (dest.troops > 0) {
-      // 守军还活着,扣除攻击兵力
-      dest.troops = Math.max(0, dest.troops - atkTotal);
+    // 修复战斗结算核心bug: 攻守双方互相消耗
+    if (atkTotal > defTotal) {
+      // 攻击方胜利: 扣除守军后占领
+      const survivors = atkTotal - defTotal;
+      captureWith(state, dest, to, assault, survivors, events);
+    } else {
+      // 守军胜利: 攻击方全歼,守军扣除攻击兵力
+      dest.troops = Math.max(0, defTotal - atkTotal);
       events.push({ kind: "clash", x: meta.cx, y: meta.cy, state: to });
-    }
-
-    // 只有守军<=0才占领
-    if (dest.troops <= 0 && atkTotal > 0) {
-      captureWith(state, dest, to, assault, events);
     }
   }
   state.armies = keep;
@@ -361,14 +360,12 @@ function deductTroops(armies: Army[], n: number) {
   }
 }
 
-function captureWith(state: RoomState, dest: Territory, to: string, armies: Army[], events: GameEvent[]) {
+function captureWith(state: RoomState, dest: Territory, to: string, armies: Army[], survivors: number, events: GameEvent[]) {
   const lead = armies[0];
-  const atkTotal = armies.reduce((sum, a) => sum + a.troops, 0);
 
-  // 修复战斗结算: 占领时守军已经<=0,攻击方直接使用剩余兵力
   dest.ownerId = assignOwner(state, lead.ownerId, to);
-  dest.troops = atkTotal;  // 直接使用攻击方剩余兵力
-  dest.startTroops = atkTotal;
+  dest.troops = Math.max(1, survivors);  // 至少留1兵占领
+  dest.startTroops = dest.troops;
   events.push({ kind: "capture", state: to, faction: lead.faction });
 }
 
