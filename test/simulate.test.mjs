@@ -10,7 +10,11 @@ const { outputFiles } = await build({
   platform: "node",
   write: false,
 });
-const { emptyTerritories, step } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].contents).toString("base64")}`);
+const { aiContext, canSendTo, emptyTerritories, seedMatch, step } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].contents).toString("base64")}`);
+const { outputFiles: policyFiles } = await build({
+  entryPoints: ["src/shared/ai-policy.ts"], bundle: true, format: "esm", platform: "node", write: false,
+});
+const { decideAiOrders } = await import(`data:text/javascript;base64,${Buffer.from(policyFiles[0].contents).toString("base64")}`);
 
 function match() {
   const territories = emptyTerritories();
@@ -69,4 +73,65 @@ test("large field clashes resolve faster than one soldier per strike", () => {
   const events = step(state);
   assert.ok(events.some((event) => event.kind === "clash"));
   assert.ok(red.troops <= 33 && blue.troops <= 33);
+});
+
+test("AI selects a visible, executable opening instead of a distant neutral state", () => {
+  const state = match();
+  state.players[0].isAI = true;
+  seedMatch(state);
+  const context = aiContext(state, "red");
+  const orders = decideAiOrders(context);
+  assert.ok(orders.length > 0);
+  assert.ok(orders.every((order) => context.visibleTargets.has(order.to)));
+  assert.ok(orders.every((order) => canSendTo(state, "red", order.from, order.to)));
+});
+
+test("AI keeps issuing attacks and conquering after its opening send", () => {
+  const state = match();
+  state.players[0].isAI = true;
+  seedMatch(state);
+  const targets = new Set();
+  let sends = 0;
+  for (let i = 0; i < 600; i++) {
+    for (const event of step(state)) {
+      if (event.kind === "send" && event.faction === "trump") {
+        sends++;
+        targets.add(event.to);
+      }
+    }
+  }
+  assert.ok(sends >= 3, `AI only sent ${sends} armies in 60 seconds`);
+  assert.ok(targets.size >= 2, `AI only targeted ${[...targets]}`);
+  assert.ok(Object.values(state.territories).filter((terr) => terr.ownerId === "red").length >= 2);
+});
+
+test("AI moves reserves from the interior to a stalled frontier", () => {
+  const context = {
+    team: "red", enemyTeam: "blue",
+    states: [
+      { id: "TX", owner: "red", troops: 10 },
+      { id: "OK", owner: "red", troops: 2 },
+      { id: "AR", owner: "neutral", troops: 20 },
+    ],
+    neighbors: { TX: ["OK"], OK: ["TX", "AR"], AR: ["OK"] },
+    visibleTargets: new Set(["TX", "OK", "AR"]),
+  };
+  assert.deepEqual(decideAiOrders(context).map(({ from, to, intent }) => ({ from, to, intent })), [
+    { from: "TX", to: "OK", intent: "support" },
+  ]);
+});
+
+test("AI waits for enough troops instead of sacrificing an outnumbered army", () => {
+  const context = {
+    team: "red", enemyTeam: "blue",
+    states: [
+      { id: "TX", owner: "red", troops: 5 },
+      { id: "OK", owner: "neutral", troops: 9 },
+    ],
+    neighbors: { TX: ["OK"], OK: ["TX"] },
+    visibleTargets: new Set(["TX", "OK"]),
+  };
+  assert.deepEqual(decideAiOrders(context), []);
+  context.states[0].troops = 11;
+  assert.equal(decideAiOrders(context)[0]?.to, "OK");
 });

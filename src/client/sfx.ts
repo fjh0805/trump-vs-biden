@@ -5,6 +5,29 @@ const MUTE_KEY = "tdbd-sfx-muted";
 
 let ctx: AudioContext | null = null;
 let muted = readMuted();
+const captureClips = {
+  trump: ["/assets/sfx-capture-trump-2.mp3", "/assets/sfx-capture-trump-3.mp3"],
+  biden: ["/assets/sfx-capture-biden.mp3", "/assets/sfx-capture-biden-2.mp3"],
+} as const;
+const voiceBuffers = new Map<string, Promise<AudioBuffer>>();
+
+function loadVoice(src: string, audio: AudioContext): Promise<AudioBuffer> {
+  let pending = voiceBuffers.get(src);
+  if (!pending) {
+    pending = fetch(src)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Audio unavailable: ${src}`);
+        return res.arrayBuffer();
+      })
+      .then((data) => audio.decodeAudioData(data))
+      .catch((error: unknown) => {
+        voiceBuffers.delete(src);
+        throw error;
+      });
+    voiceBuffers.set(src, pending);
+  }
+  return pending;
+}
 
 function readMuted() {
   try {
@@ -19,6 +42,11 @@ export function resumeSfx(): void {
   if (typeof AudioContext === "undefined") return;
   if (!ctx) ctx = new AudioContext();
   if (ctx.state === "suspended") void ctx.resume();
+  if (!muted) {
+    for (const clips of Object.values(captureClips)) {
+      for (const src of clips) void loadVoice(src, ctx).catch(() => {});
+    }
+  }
 }
 
 function ac(): AudioContext | null {
@@ -103,57 +131,24 @@ export function sfxClash() {
   tone(220, 0.08, "square", 0.1, 0.02);
 }
 
-/** 原声破城音效库 - 预加载特朗普/拜登语音片段 */
-let trumpVoices: HTMLAudioElement[] | null = null;
-let bidenVoices: HTMLAudioElement[] | null = null;
-
-function loadTrumpVoices() {
-  if (trumpVoices) return trumpVoices;
-  const maga = new Audio("/assets/sfx-capture-trump-2.mp3");
-  const win = new Audio("/assets/sfx-capture-trump-3.mp3");
-  maga.preload = "auto";
-  maga.volume = 1.0; // MAGA音量调到最大
-  win.preload = "auto";
-  win.volume = SFX_VOLUME;
-  trumpVoices = [maga, win];
-  return trumpVoices;
-}
-
-function loadBidenVoices() {
-  if (bidenVoices) return bidenVoices;
-  bidenVoices = [
-    new Audio("/assets/sfx-capture-biden.mp3"),   // Come on man
-    new Audio("/assets/sfx-capture-biden-2.mp3"), // Gets it done
-  ];
-  for (const a of bidenVoices) {
-    a.preload = "auto";
-    a.volume = SFX_VOLUME;
-  }
-  return bidenVoices;
-}
-
-/** 破城音效 - 根据阵营随机播放原声 */
+/** Play decoded clips through the already-unlocked Web Audio context. */
 export function sfxCapture(faction?: "trump" | "biden") {
-  resumeSfx();
   if (muted) return;
-
-  // 根据阵营选择音频池
-  const voices = faction === "biden" ? loadBidenVoices() : loadTrumpVoices();
-  if (voices && voices.length > 0) {
-    // 随机选择一个音频
-    const voice = voices[Math.floor(Math.random() * voices.length)];
-    voice.currentTime = 0;
-    // MAGA是第一个音频,单独提升音量
-    const isMaga = faction !== "biden" && voice === voices[0];
-    voice.volume = isMaga ? 1.0 : SFX_VOLUME * 0.9;
-    void voice.play().catch(() => {
-      // 降级到合成音效
-      playSynthCapture();
-    });
-    return;
-  }
-
-  playSynthCapture();
+  const audio = ac();
+  if (!audio) return;
+  const clips = captureClips[faction === "biden" ? "biden" : "trump"];
+  const src = clips[Math.floor(Math.random() * clips.length)];
+  void loadVoice(src, audio).then((buffer) => {
+    if (muted) return;
+    const voice = audio.createBufferSource();
+    const gain = audio.createGain();
+    voice.buffer = buffer;
+    gain.gain.value = src === captureClips.trump[0] ? 1 : SFX_VOLUME * 0.9;
+    voice.connect(gain).connect(audio.destination);
+    voice.start();
+  }).catch(() => {
+    if (!muted) playSynthCapture();
+  });
 }
 
 /** 合成破城音效(降级方案): formant yell + thump, ~0.45s. */

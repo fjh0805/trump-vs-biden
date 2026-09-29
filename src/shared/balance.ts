@@ -19,9 +19,7 @@ export const BALANCE = {
   MATCH_TIME_SEC: 270,
   AI_THINK_SEC: 0.5,  // 修复: 从 0.7 降低到 0.5,AI 反应更快
   DEFEND_THREAT_RATIO: 0.7,  // 修复: 从 0.8 降低到 0.7,AI 更早防守
-  ATTACK_ADVANTAGE_RATIO: 0.85,  // 修复: 从 1.0 降低到 0.85,AI 更激进进攻
   SWEEP_ENEMY_MAX: 15,  // 修复: 从 12 提升到 15,AI 敢打更多敌兵
-  SWEEP_SELF_MIN: 4,  // 修复: 从 5 降低到 4,AI 更早出兵
   SUPPORT_ALLY_MAX: 6,
   ATTACK_SEND_RATIO: 1.0,
   DEFEND_SEND_RATIO: 0.5,

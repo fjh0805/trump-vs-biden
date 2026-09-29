@@ -789,6 +789,10 @@ canvas.fx { pointer-events: none; }
   color: #1a1a1a;
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
+#play .icon-btn.muted {
+  background: #4a3034;
+  color: #fff;
+}
 #play .code { color: #8a4b12; }
 
 

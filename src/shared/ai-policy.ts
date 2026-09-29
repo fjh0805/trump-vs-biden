@@ -17,6 +17,7 @@ export interface AiContext {
   enemyTeam: TeamId;
   states: readonly AiStateView[];
   neighbors: Readonly<Record<StateId, readonly StateId[]>>;
+  visibleTargets: ReadonlySet<StateId>;
   allyStateIds?: ReadonlySet<StateId>;
 }
 
@@ -69,8 +70,28 @@ export function decideAiOrders(ctx: AiContext): AiOrder[] {
     return [support, attack];
   }
   if (support) return [support];
+  const advance = pickAdvance(ctx, map, myStates);
+  if (advance && attack && advance.from !== attack.from) return [attack, advance];
   if (attack) return [attack];
-  return [];
+  return advance ? [advance] : [];
+}
+
+function pickAdvance(ctx: AiContext, map: Map<StateId, AiStateView>, myStates: AiStateView[]): AiOrder | null {
+  const frontier = myStates.filter((s) => (ctx.neighbors[s.id] ?? []).some((id) => {
+    const target = map.get(id);
+    return ctx.visibleTargets.has(id) && target?.owner !== ctx.team;
+  }));
+  const donors = myStates.filter((s) => s.troops >= 10 && !frontier.includes(s));
+  let best: { from: AiStateView; to: AiStateView; score: number } | null = null;
+  for (const from of donors) {
+    for (const to of frontier) {
+      if (!(ctx.neighbors[from.id] ?? []).includes(to.id) || to.troops >= from.troops) continue;
+      const score = from.troops - to.troops;
+      if (!best || score > best.score) best = { from, to, score };
+    }
+  }
+  if (!best) return null;
+  return { intent: "support", from: best.from.id, to: best.to.id, sendRatio: 0.7, reason: `advance to ${best.to.id}` };
 }
 
 function pickDefend(
@@ -183,6 +204,7 @@ function pickAttack(
     for (const t of ctx.states) {
       if (t.id === s.id) continue;
       if (t.owner === ctx.team) continue;
+      if (!ctx.visibleTargets.has(t.id)) continue;
       const val = attackScore(t.id);
       const weakEnemyHome = enemyOwned(ctx, t) && Boolean(t.isHome) && t.troops <= s.troops;
       const highValue = val >= 70;
@@ -192,17 +214,15 @@ function pickAttack(
     }
 
     for (const nid of targets) {
+      if (!ctx.visibleTargets.has(nid)) continue;
       const n = map.get(nid);
       if (!n) continue;
       if (n.owner === ctx.team) continue;
 
       const enemyTroops = n.troops;
-      const advantage = s.troops >= enemyTroops * BALANCE.ATTACK_ADVANTAGE_RATIO;
-      const sweep =
-        enemyTroops <= BALANCE.SWEEP_ENEMY_MAX && s.troops >= BALANCE.SWEEP_SELF_MIN;
-      const commit =
-        s.troops > enemyTroops && s.troops >= BALANCE.RICH_MIN_TROOPS + 2;
-      if (!advantage && !sweep && !commit) continue;
+      // The whole army leaves; account for defenders growing during travel and combat.
+      const surplus = n.owner === "neutral" || n.owner == null ? 2 : 3;
+      if (Math.floor(s.troops) < Math.ceil(enemyTroops) + surplus) continue;
 
       const adjacentBonus = (ctx.neighbors[s.id] ?? []).includes(nid) ? 8 : 0;
       const score =

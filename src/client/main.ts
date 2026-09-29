@@ -8,7 +8,7 @@ import { headFor } from "./avatars";
 import { createRoomCode, RoomSocket } from "./net";
 import { linesForEnd, pushRadio } from "./radio";
 import { GameView } from "./render";
-import { isSfxMuted, resumeSfx, setSfxMuted, sfxWin } from "./sfx";
+import { isSfxMuted, resumeSfx, setSfxMuted, sfxSend, sfxWin } from "./sfx";
 import { initBgm, isBgmMuted, paintBgmButtons, setBgmMuted, setBgmTrack, startBgm, type BgmTrackId } from "./bgm";
 import { VoiceMesh } from "./voice";
 
@@ -85,8 +85,8 @@ $("btn-mute").onclick = () => {
 $("btn-sfx").onclick = () => {
   const next = !isSfxMuted();
   setSfxMuted(next);
-  if (!next) resumeSfx();
   paintSfx();
+  if (!next) sfxSend();
 };
 function onBgmClick() {
   if (isBgmMuted()) {
@@ -505,7 +505,12 @@ function escapeHtml(s: string) {
 const TUTORIAL_KEY = "tdbd-tutorial-done";
 
 function paintSfx() {
-  $("btn-sfx").classList.toggle("muted", isSfxMuted());
+  const button = $("btn-sfx");
+  const off = isSfxMuted();
+  button.classList.toggle("muted", off);
+  button.textContent = off ? "音效关" : "音效";
+  button.setAttribute("aria-pressed", String(!off));
+  button.title = off ? "开启音效" : "关闭音效";
 }
 
 function tutorialDone() {

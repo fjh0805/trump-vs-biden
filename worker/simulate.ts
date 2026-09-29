@@ -405,9 +405,10 @@ function runAI(state: RoomState, events: GameEvent[]) {
   }
 }
 
-function aiContext(state: RoomState, playerId: string): AiContext | null {
+export function aiContext(state: RoomState, playerId: string): AiContext | null {
   const me = state.players.find((p) => p.id === playerId);
   if (!me) return null;
+  const visibleTargets = visibleSet(state, playerId) as Set<StateId>;
   const team = me.faction === "trump" ? "red" : "blue";
   const split = state.mode === "2v2";
   const states: AiStateView[] = Object.entries(state.territories).map(([id, t]) => {
@@ -438,6 +439,7 @@ function aiContext(state: RoomState, playerId: string): AiContext | null {
     enemyTeam: team === "red" ? "blue" : "red",
     states,
     neighbors,
+    visibleTargets,
     allyStateIds,
   };
 }
