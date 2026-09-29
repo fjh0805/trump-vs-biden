@@ -1,6 +1,6 @@
 import { decideAiOrders } from "../src/shared/ai-policy";
 import type { AiContext, AiStateView } from "../src/shared/ai-policy";
-import { BALANCE, neutralTroopsPerSecond, troopsPerSecond } from "../src/shared/balance";
+import { BALANCE, combatDamagePerStep, neutralTroopsPerSecond, troopsPerSecond } from "../src/shared/balance";
 import type { StateId } from "../src/shared/state-labels";
 import {
   ADJACENT,
@@ -149,7 +149,7 @@ export function sendArmy(state: RoomState, playerId: string, from: string, to: s
   const a = MAP.states[from];
   const b = MAP.states[to];
   const dist = Math.hypot(b.cx - a.cx, b.cy - a.cy);
-  const seconds = armyTravelSeconds(dist);
+  const seconds = armyTravelSeconds(dist, n);
   const army: Army = {
     id: `a${state.armySeq++}`,
     ownerId: playerId,
@@ -203,7 +203,7 @@ export function step(state: RoomState): GameEvent[] {
 
   const strike = combatDue(state.tick);
   resolveClashes(state, events, strike);
-  resolveSieges(state, events, strike);
+  resolveSieges(state, events);
 
   runAI(state, events);
 
@@ -269,6 +269,7 @@ function resolveClashes(state: RoomState, events: GameEvent[], strike: boolean) 
       const a = live[i];
       const b = live[j];
       if (!a.troops || !b.troops) continue;
+      if (a.arrived && b.arrived) continue;
       if (a.faction === b.faction) continue;
       const sameEdge =
         (a.from === b.from && a.to === b.to) || (a.from === b.to && a.to === b.from);
@@ -289,7 +290,7 @@ function resolveClashes(state: RoomState, events: GameEvent[], strike: boolean) 
   state.armies = state.armies.filter((a) => a.troops > 0);
 }
 
-function resolveSieges(state: RoomState, events: GameEvent[], strike: boolean) {
+function resolveSieges(state: RoomState, events: GameEvent[]) {
   const traveling: Army[] = [];
   const atDest = new Map<string, Army[]>();
   for (const army of state.armies) {
@@ -325,7 +326,6 @@ function resolveSieges(state: RoomState, events: GameEvent[], strike: boolean) {
       }
     }
 
-    // 先处理增援
     for (const army of reinforce) {
       dest.troops = dest.troops + army.troops;
     }
@@ -333,21 +333,34 @@ function resolveSieges(state: RoomState, events: GameEvent[], strike: boolean) {
     if (!assault.length) continue;
 
     const meta = MAP.states[to];
-    const atkTotal = assault.reduce((sum, a) => sum + a.troops, 0);
-    const defTotal = dest.troops;
+    const factions = new Set(assault.map((a) => a.faction));
+    if (factions.size > 1) {
+      const totals = [...factions].map((faction) => assault.filter((a) => a.faction === faction).reduce((sum, a) => sum + a.troops, 0));
+      const loss = combatDamagePerStep(totals[0], totals[1], TICK_MS);
+      for (const faction of factions) {
+        deductTroops(assault.filter((a) => a.faction === faction), loss);
+      }
+      if (state.tick % 5 === 0) events.push({ kind: "clash", x: meta.cx, y: meta.cy, state: to });
+      keep.push(...assault.filter((a) => a.troops > 0));
+      continue;
+    }
 
-    // 修复战斗结算核心bug: 攻守双方互相消耗
-    if (atkTotal > defTotal) {
-      // 攻击方胜利: 扣除守军后占领
-      const survivors = atkTotal - defTotal;
-      captureWith(state, dest, to, assault, survivors, events);
-    } else if (atkTotal === defTotal) {
-      // 打平: 攻击方以1兵占领（付出全部代价）
-      captureWith(state, dest, to, assault, 1, events);
-    } else {
-      // 守军胜利: 攻击方全歼,守军扣除攻击兵力
-      dest.troops = Math.max(0, defTotal - atkTotal);
+    if (dest.troops <= 0) {
+      captureWith(state, dest, to, assault, assault.reduce((sum, a) => sum + a.troops, 0), events);
+      continue;
+    }
+    const attackers = assault.reduce((sum, a) => sum + a.troops, 0);
+    const loss = combatDamagePerStep(attackers, dest.troops, TICK_MS);
+    dest.troops = Math.max(0, dest.troops - loss);
+    deductTroops(assault, loss);
+    if (state.tick % 5 === 0 || dest.troops <= 0) {
       events.push({ kind: "clash", x: meta.cx, y: meta.cy, state: to });
+    }
+    const survivors = assault.reduce((sum, a) => sum + a.troops, 0);
+    if (dest.troops <= 0) {
+      captureWith(state, dest, to, assault, survivors, events);
+    } else if (survivors > 0) {
+      keep.push(...assault.filter((a) => a.troops > 0));
     }
   }
   state.armies = keep;

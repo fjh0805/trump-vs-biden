@@ -16,13 +16,12 @@ export default {
     }
 
     if (url.pathname === "/api/rooms" && request.method === "POST") {
-      let code = randomCode();
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 12; i++) {
+        const code = randomCode();
         const meta = await env.ROOM.getByName(code).getMeta();
-        if (!meta.exists) break;
-        code = randomCode();
+        if (!meta.exists) return json({ code });
       }
-      return json({ code });
+      return json({ error: "no available room code" }, 503);
     }
 
     if (url.pathname === "/api/rooms/lookup" && request.method === "GET") {

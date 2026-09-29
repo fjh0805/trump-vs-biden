@@ -24,6 +24,9 @@ let snap: RoomSnapshot | null = null;
 let view: GameView | null = null;
 let solo = false;
 let seenVis: Set<string> | null = null;
+let entering = false;
+let attempt = 0;
+let peerIds: string[] = [];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -47,11 +50,7 @@ document.querySelectorAll("#faction button").forEach((b) => {
 });
 $("btn-create").onclick = () => void enter("create");
 $("btn-join").onclick = () => void enter("join");
-$("btn-ai").onclick = () => {
-  solo = true;
-  mode = "1v1";
-  void enter("create");
-};
+$("btn-ai").onclick = () => void enter("create", true);
 $("btn-start").onclick = () => sock.send({ type: "start" });
 $("btn-rematch").onclick = () => sock.send({ type: "rematch" });
 $("btn-chat").onclick = sendChat;
@@ -96,9 +95,15 @@ document.querySelectorAll<HTMLElement>("#bgm-tracks [data-track]").forEach((btn)
 paintBgmButtons();
 document.getElementById("title")?.addEventListener("pointerdown", () => { resumeSfx(); startBgm(); }, { once: true });
 $("btn-leave").onclick = () => {
+  attempt++;
+  entering = false;
+  setEnterDisabled(false);
   sock.close();
   voice.stop();
+  peerIds = [];
   solo = false;
+  snap = null;
+  view?.reset();
   seenVis = null;
   setSheet(false);
   $("connecting").classList.remove("show");
@@ -127,12 +132,27 @@ $("sheet-handle").onclick = () => setSheet(!sheet.classList.contains("open"));
 // 喊话功能已删除
 
 sock.onMessage = onServer;
-sock.onClose = () => toast("连接断开，尝试刷新后重新加入");
+sock.onClose = () => {
+  entering = false;
+  setEnterDisabled(false);
+  $("connecting").classList.remove("show");
+  if (snap) toast("连接断开，请返回并用房间码重新加入");
+};
 
 voice.send = (to, payload) => sock.send({ type: "signal", to, payload });
 voice.onSpeaking = (speaking) => sock.send({ type: "speaking", speaking });
 
-async function enter(intent: "create" | "join") {
+function setEnterDisabled(disabled: boolean) {
+  for (const id of ["btn-create", "btn-join", "btn-ai"]) ($<HTMLButtonElement>(id)).disabled = disabled;
+}
+
+async function enter(intent: "create" | "join", playSolo = false) {
+  if (entering) return;
+  entering = true;
+  setEnterDisabled(true);
+  const currentAttempt = ++attempt;
+  solo = playSolo;
+  if (solo) mode = "1v1";
   resumeSfx();
   startBgm();
   paintBgmButtons();
@@ -144,39 +164,47 @@ async function enter(intent: "create" | "join") {
       code = await createRoomCode();
     } catch {
       toast("创建房间失败");
+      entering = false;
+      setEnterDisabled(false);
       return;
     }
   } else if (code.length !== CODE_LENGTH || [...code].some((c) => !CODE_ALPHABET.includes(c))) {
     toast("请输入 4 位房间码");
+    entering = false;
+    setEnterDisabled(false);
     return;
   }
+  if (currentAttempt !== attempt) return;
   $("title").classList.remove("show");
   $("play").classList.add("show");
   $("connecting").classList.add("show");
   $("room-code").textContent = code;
   if (!view) {
     view = new GameView($("map") as unknown as SVGSVGElement, $("fx") as HTMLCanvasElement);
-    view.ratio = 1;
-    view.onSend = (from, to, ratio) => sock.send({ type: "send", from, to, ratio });
+    view.onSend = (from, to) => sock.send({ type: "send", from, to });
   }
   requestAnimationFrame(() => view?.camera.fitCover());
   sock.connect(code);
   try {
     await waitOpen();
   } catch {
+    if (currentAttempt !== attempt) return;
+    sock.close();
     $("connecting").classList.remove("show");
-    toast("正在连房间…失败，请重试");
+    $("play").classList.remove("show");
+    $("title").classList.add("show");
+    entering = false;
+    setEnterDisabled(false);
+    toast("连接房间失败，请重试");
     return;
   }
+  if (currentAttempt !== attempt) return;
   sock.send({ type: "hello", playerId, name, code, intent, mode, faction, home: homePick });
-  void enableMic();
-  if (solo) {
-    setTimeout(() => sock.send({ type: "start" }), 400);
-  }
 }
 
 async function enableMic() {
   const ok = await voice.enable();
+  if (ok) void voice.syncPeers(peerIds);
   $("btn-mic").textContent = ok ? "麦开" : "麦拒";
   if (!ok) toast("未获得麦克风：仍可看说话灯和文字聊天");
 }
@@ -197,7 +225,18 @@ function onServer(msg: ServerToClient) {
   if (msg.type === "error") {
     $("connecting").classList.remove("show");
     if (/出兵|相邻|兵力|视野|尚未开始|目标|只能/.test(msg.message)) view?.revertLastSend();
+    if (entering) {
+      sock.close();
+      $("play").classList.remove("show");
+      $("title").classList.add("show");
+      entering = false;
+      setEnterDisabled(false);
+    }
     toast(msg.message);
+    return;
+  }
+  if (msg.type === "sendAck") {
+    view?.confirmSend(msg.from, msg.to);
     return;
   }
   if (msg.type === "signal") {
@@ -205,6 +244,7 @@ function onServer(msg: ServerToClient) {
     return;
   }
   if (msg.type === "peers") {
+    peerIds = msg.ids;
     void voice.syncPeers(msg.ids);
     return;
   }
@@ -214,6 +254,8 @@ function onServer(msg: ServerToClient) {
 function paint(s: RoomSnapshot) {
   const was = snap?.phase;
   snap = s;
+  entering = false;
+  setEnterDisabled(false);
   view?.render(s);
   $("room-code").textContent = s.code;
   $("score").textContent = compactScore(s);
@@ -227,13 +269,13 @@ function paint(s: RoomSnapshot) {
       const drop = !p.connected && !p.isAI ? " · 掉线" : "";
       return `<div class="player ${p.speaking ? "talk" : ""}">
         <div class="hero-wrap ${p.speaking ? "talk" : ""}">${headFor(p.faction, 44)}</div>
-        <div class="meta"><b>${p.name}${you}</b><span>${p.faction === "trump" ? "特朗普" : "拜登"} · ${zone} · ${home}${bot}${drop}${p.muted ? " · 静音" : ""}</span></div>
+        <div class="meta"><b>${escapeHtml(p.name)}${you}</b><span>${p.faction === "trump" ? "特朗普" : "拜登"} · ${zone} · ${home}${bot}${drop}${p.muted ? " · 静音" : ""}</span></div>
       </div>`;
     })
     .join("");
   $("log").innerHTML = s.chat
     .slice(-6)
-    .map((c) => `<div><b>${c.name}</b> ${escapeHtml(c.text)}</div>`)
+    .map((c) => `<div><b>${escapeHtml(c.name)}</b> ${escapeHtml(c.text)}</div>`)
     .join("");
   $("connecting").classList.remove("show");
   const waitPeer = s.phase === "playing" && s.players.some((p) => p.id !== s.you && !p.isAI && !p.connected);
@@ -241,6 +283,10 @@ function paint(s: RoomSnapshot) {
   $("banner").classList.toggle("show", waitPeer);
   $("banner").textContent = COPY.peerWait;
   const host = s.you === s.hostId;
+  if (solo && host && s.phase === "lobby") {
+    solo = false;
+    sock.send({ type: "start" });
+  }
   $("btn-start").style.display = host && s.phase === "lobby" ? "block" : "none";
   $("btn-start").textContent = COPY.start;
   paintLobbyHomes(s);
@@ -252,6 +298,8 @@ function paint(s: RoomSnapshot) {
   const ov = $("result");
   if (s.phase === "ended") {
     ov.classList.add("show");
+    $<HTMLButtonElement>("btn-rematch").hidden = !host;
+    $("result-wait").hidden = host;
     const title =
       s.winner === "draw" ? "平局" : s.winner === "trump" ? "特朗普阵营获胜" : "拜登阵营获胜";
     $("result-title").textContent = title;

@@ -1,4 +1,5 @@
 import { BALANCE } from "../src/shared/balance";
+import { TICK_MS } from "../src/shared/constants";
 import type { ArmyView, RoomSnapshot, StateView } from "../src/shared/protocol";
 import type { RoomState } from "../src/shared/room-state";
 import { countScores, factionOf, nearestState, visibleSet } from "./simulate";
@@ -31,14 +32,16 @@ export function snapshotFor(state: RoomState, playerId: string, events: RoomSnap
     return false;
   });
   const armies: ArmyView[] = state.armies
-    .filter((a) => !a.arrived && (vis.has(a.from) || vis.has(a.to) || vis.has(nearestState(a.x, a.y))))
+    .filter((a) => vis.has(a.from) || vis.has(a.to) || vis.has(nearestState(a.x, a.y)))
     .map((a) => ({
       id: a.id,
       ownerId: a.ownerId,
       faction: a.faction,
+      arrived: a.arrived,
       x: a.x,
       y: a.y,
       troops: a.troops,
+      travelMs: TICK_MS / a.speed,
       from: a.from,
       to: a.to,
     }));

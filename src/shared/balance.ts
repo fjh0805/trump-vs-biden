@@ -1,8 +1,8 @@
 /**
  * 修订数值真理源（特朗普验算版）
  *
- * 目标：一局 4–5 分钟；前 2 分钟约扩到 8–12 州；交火时长 ≈ min(兵力)*COMBAT_TICK_SEC ≥ 3s（12v12）
- * 作废：1兵/1.2s、上限50、交火0.1s；生产上限40只向上填充，增援可叠过上限
+ * 目标：一局 4–5 分钟；前 2 分钟约扩到 8–12 州；大军交火按规模加速结算
+ * 作废：1兵/1.2s、上限50、每回合固定减1；生产上限40只向上填充，增援可叠过上限
  */
 
 export const BALANCE = {
@@ -13,8 +13,6 @@ export const BALANCE = {
   NEUTRAL_PROD_INTERVAL_SEC: 3.0,
   TROOP_CAP: 40,
   NEUTRAL_TROOP_CAP: 9, // 修复: 降低中立州上限,从12降到9,避免中立州过于难打
-  DEFAULT_SEND_RATIO: 1,
-  SEND_RATIOS: [0.25, 0.5, 1.0] as const,
   COMBAT_TICK_SEC: 0.25,
   COMBAT_KILL_PER_TICK: 1,
   WIN_STATE_COUNT: 26,
@@ -34,7 +32,22 @@ export const BALANCE = {
 export type Balance = typeof BALANCE;
 
 export function estimateCombatSeconds(a: number, b: number): number {
-  return Math.min(a, b) * BALANCE.COMBAT_TICK_SEC;
+  let attackers = a;
+  let defenders = b;
+  let rounds = 0;
+  while (attackers > 0 && defenders > 0) {
+    const loss = combatDamagePerStep(attackers, defenders, 100);
+    attackers -= loss;
+    defenders -= loss;
+    rounds++;
+  }
+  return rounds * 0.1;
+}
+
+export function combatDamagePerStep(attackers: number, defenders: number, stepMs: number): number {
+  const roundLoss = Math.max(BALANCE.COMBAT_KILL_PER_TICK, Math.ceil(Math.min(attackers, defenders) / 6));
+  const lossPerSecond = Math.max(10, roundLoss / BALANCE.COMBAT_TICK_SEC);
+  return lossPerSecond * stepMs / 1000;
 }
 
 export function troopsPerSecond(isHome: boolean): number {

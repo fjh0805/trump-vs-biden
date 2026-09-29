@@ -4,7 +4,7 @@ export type ClientToServer =
   | { type: "hello"; playerId: string; name: string; code: string; intent: "create" | "join"; mode?: Mode; faction?: Faction; home?: string }
   | { type: "start" }
   | { type: "pickHome"; home: string }
-  | { type: "send"; from: string; to: string; ratio: number }
+  | { type: "send"; from: string; to: string }
   | { type: "chat"; text: string }
   | { type: "mute"; muted: boolean }
   | { type: "speaking"; speaking: boolean }
@@ -47,9 +47,11 @@ export interface ArmyView {
   id: string;
   ownerId: string;
   faction: Faction;
+  arrived: boolean;
   x: number;
   y: number;
   troops: number;
+  travelMs: number;
   from: string;
   to: string;
 }
@@ -80,5 +82,6 @@ export interface RoomSnapshot {
 export type ServerToClient =
   | RoomSnapshot
   | { type: "error"; message: string }
+  | { type: "sendAck"; from: string; to: string }
   | { type: "signal"; from: string; payload: SignalPayload }
   | { type: "peers"; ids: string[] };

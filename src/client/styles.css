@@ -378,13 +378,7 @@ canvas.fx { pointer-events: none; }
   padding: 6px 8px calc(6px + var(--safe-b));
   background: linear-gradient(to top, rgba(18,22,30,.62), rgba(18,22,30,0));
 }
-.ratio { display: none !important;
-  display: flex;
-  flex: 1;
-  gap: 4px;
-  min-width: 0;
-}
-.ratio button, .icon-btn, .start {
+.icon-btn, .start {
   border: 0;
   border-radius: 12px;
   padding: 10px 12px;
@@ -395,8 +389,6 @@ canvas.fx { pointer-events: none; }
   min-height: 48px;
   min-width: 48px;
 }
-.ratio button { flex: 1; padding: 10px 4px; font-size: 13px; font-weight: 700; }
-.ratio button.on { background: #2a3340; color: #fff; }
 .start { background: #3d4a3a; color: #eef0e8; font-weight: 700; width: 100%; }
 .icon-btn.muted { background: #4a3034; }
 .send-bar .icon-btn { flex: 0 0 auto; font-size: 12px; padding: 8px 10px; }
@@ -573,7 +565,7 @@ canvas.fx { pointer-events: none; }
   #play.chips-on .callout { bottom: calc(100px + var(--safe-b)); }
   .chips { bottom: calc(50px + var(--safe-b)); }
   .send-bar { padding: 6px 10px calc(6px + var(--safe-b)); }
-  .ratio button, .icon-btn { min-height: 48px; }
+  .icon-btn { min-height: 48px; }
   .tutorial { bottom: calc(56px + var(--safe-b)); }
   #play.chips-on .tutorial { bottom: calc(100px + var(--safe-b)); }
   .sheet { max-height: 86dvh; }
@@ -781,13 +773,11 @@ canvas.fx { pointer-events: none; }
 #play .send-bar {
   background: linear-gradient(to top, rgba(246, 241, 232, 0.94), rgba(246, 241, 232, 0));
 }
-#play .ratio button,
 #play .icon-btn {
   background: #fff;
   color: #1a1a1a;
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
-#play .ratio button.on { background: #141414; color: #fff; }
 #play .code { color: #8a4b12; }
 
 

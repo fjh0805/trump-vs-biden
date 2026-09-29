@@ -11,17 +11,24 @@ export class RoomSocket {
     const ws = new WebSocket(`${proto}://${location.host}/api/ws?code=${encodeURIComponent(code)}`);
     this.ws = ws;
     ws.addEventListener("message", (ev) => {
+      if (this.ws !== ws) return;
       try {
         this.onMessage(JSON.parse(ev.data as string) as ServerToClient);
       } catch {
         /* ignore */
       }
     });
-    ws.addEventListener("close", () => this.onClose());
+    ws.addEventListener("close", () => {
+      if (this.ws !== ws) return;
+      this.ws = null;
+      this.onClose();
+    });
   }
 
-  send(msg: ClientToServer) {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+  send(msg: ClientToServer): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify(msg));
+    return true;
   }
 
   close() {

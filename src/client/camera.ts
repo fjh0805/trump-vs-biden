@@ -9,7 +9,9 @@ export class MapCamera {
   minScale = 1;
   maxScale = 6;
   private pointers = new Map<number, { x: number; y: number }>();
+  private pointerStart = new Map<number, { x: number; y: number }>();
   private moved = false;
+  private multitouch = false;
   private lastTap = 0;
   private pinch = { dist: 1, scale: 1, wx: 0, wy: 0 };
   private drag = { x: 0, y: 0, px: 0, py: 0 };
@@ -20,6 +22,7 @@ export class MapCamera {
   onSelectStart: (clientX: number, clientY: number) => boolean = () => false;
   onSelectMove: (clientX: number, clientY: number) => void = () => {};
   onSelectEnd: (clientX: number, clientY: number) => void = () => {};
+  onSelectCancel: () => void = () => {};
 
   constructor(
     private viewport: HTMLElement,
@@ -99,14 +102,14 @@ export class MapCamera {
   private clamp() {
     const vw = this.viewport.clientWidth;
     const vh = this.viewport.clientHeight;
+    this.minScale = this.coverScale();
+    this.scale = Math.min(this.maxScale, Math.max(this.minScale, this.scale));
     const W = vw * this.scale;
     const H = vh * this.scale;
     if (W <= vw) this.x = (vw - W) / 2;
     else this.x = Math.min(0, Math.max(vw - W, this.x));
     if (H <= vh) this.y = (vh - H) / 2;
     else this.y = Math.min(0, Math.max(vh - H, this.y));
-    this.minScale = this.coverScale();
-    this.scale = Math.min(this.maxScale, Math.max(this.minScale, this.scale));
   }
 
   private apply() {
@@ -134,8 +137,10 @@ export class MapCamera {
     this.viewport.setPointerCapture(e.pointerId);
     const p = this.pt(e);
     this.pointers.set(e.pointerId, p);
-    this.moved = false;
+    this.pointerStart.set(e.pointerId, p);
     if (this.pointers.size === 1) {
+      this.moved = false;
+      this.multitouch = false;
       if (this.onSelectStart(e.clientX, e.clientY)) {
         this.selecting = true;
         return;
@@ -143,7 +148,10 @@ export class MapCamera {
       this.selecting = false;
       this.drag = { x: this.x, y: this.y, px: p.x, py: p.y };
     } else if (this.pointers.size === 2) {
+      if (this.selecting) this.onSelectCancel();
       this.selecting = false;
+      this.multitouch = true;
+      this.moved = true;
       const [a, b] = [...this.pointers.values()];
       const cx = (a.x + b.x) / 2;
       const cy = (a.y + b.y) / 2;
@@ -159,8 +167,8 @@ export class MapCamera {
   private onMove = (e: PointerEvent) => {
     if (!this.pointers.has(e.pointerId)) return;
     const p = this.pt(e);
-    const prev = this.pointers.get(e.pointerId)!;
-    if (Math.hypot(p.x - prev.x, p.y - prev.y) > TAP_PX) this.moved = true;
+    const start = this.pointerStart.get(e.pointerId)!;
+    if (Math.hypot(p.x - start.x, p.y - start.y) > TAP_PX) this.moved = true;
     this.pointers.set(e.pointerId, p);
     e.preventDefault();
     if (this.selecting && this.pointers.size === 1) {
@@ -190,6 +198,12 @@ export class MapCamera {
     if (!this.pointers.has(e.pointerId)) return;
     const p = this.pt(e);
     this.pointers.delete(e.pointerId);
+    this.pointerStart.delete(e.pointerId);
+    if (e.type === "pointercancel") {
+      if (this.selecting) this.onSelectCancel();
+      this.selecting = false;
+      this.multitouch = true;
+    }
     if (this.selecting && this.pointers.size === 0) {
       this.selecting = false;
       this.onSelectEnd(e.clientX, e.clientY);
@@ -201,7 +215,7 @@ export class MapCamera {
       return;
     }
     if (this.pointers.size > 0) return;
-    if (this.moved) return;
+    if (this.moved || this.multitouch || e.type === "pointercancel") return;
     const now = performance.now();
     if (now - this.lastTap < DBL_MS) {
       this.lastTap = 0;

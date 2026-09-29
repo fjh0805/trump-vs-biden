@@ -68,6 +68,7 @@ export class GameRoom extends DurableObject<Env> {
     const att = (ws.deserializeAttachment() as Attachment | null) ?? { playerId: "" };
     const state = await this.load();
     if (!state || !att.playerId) return;
+    if (this.socketOf(att.playerId, ws)) return;
     const p = state.players.find((x) => x.id === att.playerId);
     if (p) {
       p.connected = false;
@@ -132,12 +133,13 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
     const player = state.players.find((p) => p.id === att.playerId);
-    if (!player) {
+    if (!player || this.socketOf(att.playerId) !== ws) {
       ws.send(JSON.stringify({ type: "error", message: "你不在这个房间" }));
       return;
     }
 
     if (msg.type === "start") {
+      if (state.phase !== "lobby") return;
       if (!player.isHost) {
         ws.send(JSON.stringify({ type: "error", message: "只有房主可以开始" }));
         return;
@@ -173,13 +175,14 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     if (msg.type === "send") {
-      const err = sendArmy(state, player.id, msg.from, msg.to, msg.ratio);
+      const err = sendArmy(state, player.id, msg.from, msg.to, 1);
       if (err) {
         ws.send(JSON.stringify({ type: "error", message: err }));
         return;
       }
-      this.pending.push({ kind: "send", from: msg.from, to: msg.to, faction: player.faction, scout: msg.ratio <= 0.3 });
+      this.pending.push({ kind: "send", from: msg.from, to: msg.to, faction: player.faction });
       await this.save(state);
+      ws.send(JSON.stringify({ type: "sendAck", from: msg.from, to: msg.to }));
       this.flush();
       return;
     }
@@ -222,7 +225,7 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     if (msg.type === "rematch") {
-      if (state.phase !== "ended") return;
+      if (state.phase !== "ended" || !player.isHost) return;
       const humans: { id: string; name: string; home?: string }[] = state.players
         .filter((p) => !p.isAI || p.aiHold)
         .map((h) => ({ id: h.id, name: h.name, home: h.home }));
@@ -254,7 +257,7 @@ export class GameRoom extends DurableObject<Env> {
     let state = await this.load();
     const name = (msg.name || "玩家").trim().slice(0, 12);
     if (msg.intent === "create") {
-      if (state && state.players.some((p) => p.connected && !p.isAI)) {
+      if (state) {
         ws.send(JSON.stringify({ type: "error", message: "房间码已被占用" }));
         return;
       }
@@ -318,9 +321,6 @@ export class GameRoom extends DurableObject<Env> {
           existing.aiHold = false;
           existing.isAI = false;
         }
-        if (msg.home) {
-          existing.home = resolveHome(existing.faction, msg.home, state.mode === "2v2" ? existing.zone : undefined);
-        }
       } else {
         if (state.phase !== "lobby") {
           ws.send(JSON.stringify({ type: "error", message: "对局已开始，无法加入" }));
@@ -367,8 +367,9 @@ export class GameRoom extends DurableObject<Env> {
     this.sendPeerLists();
   }
 
-  private socketOf(playerId: string): WebSocket | undefined {
+  private socketOf(playerId: string, exclude?: WebSocket): WebSocket | undefined {
     for (const ws of this.ctx.getWebSockets()) {
+      if (ws === exclude || ws.readyState !== WebSocket.OPEN) continue;
       const att = ws.deserializeAttachment() as Attachment | null;
       if (att?.playerId === playerId) return ws;
     }
@@ -385,6 +386,7 @@ export class GameRoom extends DurableObject<Env> {
     const state = this.memory;
     if (!state) return;
     for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att?.playerId) continue;
       const snap = snapshotFor(state, att.playerId, events);
@@ -397,6 +399,7 @@ export class GameRoom extends DurableObject<Env> {
     if (!state) return;
     const humans = state.players.filter((p) => !p.isAI && p.connected).map((p) => p.id);
     for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att?.playerId) continue;
       ws.send(JSON.stringify({ type: "peers", ids: humans.filter((id) => id !== att.playerId) }));

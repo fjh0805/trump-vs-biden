@@ -1,8 +1,7 @@
-import { BALANCE } from "../shared/balance";
-import { controlBank, labelEn, labelZh, armyTravelSeconds } from "../shared/constants";
-import type { ArmyView, GameEvent, RoomSnapshot } from "../shared/protocol";
+import { estimateCombatSeconds } from "../shared/balance";
+import { controlBank, labelEn, labelZh } from "../shared/constants";
+import type { ArmyView, GameEvent, RoomSnapshot, StateView } from "../shared/protocol";
 import mapJson from "../shared/us-map.json";
-import { headFor } from "./avatars";
 import { MapCamera } from "./camera";
 import { sfxCapture, sfxClash, sfxSend } from "./sfx";
 
@@ -29,15 +28,24 @@ interface Stream {
   p: number;
   start: number;
   duration: number;
-  arrivedAt: number;
-  appliedDmg: boolean;
+  arrivedAt: number | null;
+  combatDuration: number;
+  combatDepth: number;
   cols: number;
+  nextSlot: number;
   root: SVGGElement;
-  line: SVGPathElement | null;
-  head: SVGGElement;
   trailHeads: SVGGElement[];
-  num: SVGTextElement;
 }
+
+interface TroopDisplay {
+  from: number;
+  target: number;
+  start: number;
+  ownerId: string | null;
+  faction: StateView["faction"];
+}
+
+const DAMAGE_TWEEN_MS = 90;
 
 export class GameView {
   svg: SVGSVGElement;
@@ -48,25 +56,22 @@ export class GameView {
   dragTarget: string | null = null;
   private dragging = false;
   private dragStartedSelected = false;
+  private dragMoved = false;
+  private dragStart = { x: 0, y: 0 };
+  private lastDragPoint = { x: 0, y: 0 };
+  private dragCandidate: string | null = null;
+  private selectionBeforeDrag: { selected: string | null; origins: Set<string> } | null = null;
   private dragPointer = { x: 0, y: 0 };
   private dragLine: SVGPathElement | null = null;
-  ratio: number = 1;
-  onSend: (from: string, to: string, ratio: number) => void = () => {};
+  onSend: (from: string, to: string) => boolean = () => false;
   private armyLayer: SVGGElement;
   private trailLayer: SVGGElement;
   private labelLayer: SVGGElement;
   private floaters: Floater[] = [];
   private hover: string | null = null;
   private streams = new Map<string, Stream>();
-  private consumedIds = new Set<string>();
-  private pendingDmg = new Map<string, number>();
-  private pendingOwner = new Map<string, "trump" | "biden">();
-  private lastSnapTroops = new Map<string, number>();
-  private sieges = new Map<string, { def: number; atk: number; faction: "trump" | "biden"; acc: number }>();
-  private captureHold = new Map<string, number>();
-  private reinforceHold = new Map<string, number>();
-  private sendHold = new Map<string, number>();
-  private sendLog: { from: string; n: number }[] = [];
+  private pendingSends: { from: string; to: string; n: number; acked: boolean }[] = [];
+  private troopDisplays = new Map<string, TroopDisplay>();
   private lastTs = 0;
   private labels = new Map<string, { g: SVGGElement; zh: SVGTextElement; n: SVGTextElement }>();
   private viewport: HTMLElement;
@@ -94,7 +99,10 @@ export class GameView {
         this.tip(s.id);
       });
       p.addEventListener("pointerleave", () => {
-        if (this.hover === s.id) this.hover = null;
+        if (this.hover === s.id) {
+          this.hover = null;
+          this.tip(this.selected ?? undefined);
+        }
       });
       ground.appendChild(p);
       small.push({ id: s.id, cx: s.cx, cy: s.cy, area: 0 });
@@ -132,19 +140,32 @@ export class GameView {
     this.camera.onSelectStart = (x, y) => this.selectStart(x, y);
     this.camera.onSelectMove = (x, y) => this.selectMove(x, y);
     this.camera.onSelectEnd = (x, y) => this.selectEnd(x, y);
+    this.camera.onSelectCancel = () => {
+      this.dragging = false;
+      this.dragTarget = null;
+      if (this.selectionBeforeDrag) {
+        this.selected = this.selectionBeforeDrag.selected;
+        this.origins = this.selectionBeforeDrag.origins;
+      }
+      this.selectionBeforeDrag = null;
+      this.dragCandidate = null;
+      this.refreshPick();
+    };
     requestAnimationFrame((t) => this.tick(t));
   }
 
-  private hitState(cx: number, cy: number): string | undefined {
+  private hitState(cx: number, cy: number, allowNearby = true): string | undefined {
+    const rect = this.viewport.getBoundingClientRect();
+    if (cx < rect.left || cx > rect.right || cy < rect.top || cy > rect.bottom) return;
     const stack = document.elementsFromPoint(cx, cy);
     for (const n of stack) {
-      if (!(n instanceof Element)) continue;
+      if (!(n instanceof Element) || !this.svg.contains(n)) continue;
       const hit = n.closest("[data-state]");
       if (hit instanceof HTMLElement || hit instanceof SVGElement) {
         return hit.dataset.state;
       }
     }
-    return this.nearestState(cx, cy);
+    return allowNearby ? this.nearestState(cx, cy) : undefined;
   }
 
   private tapAt(cx: number, cy: number) {
@@ -172,22 +193,14 @@ export class GameView {
     const id = this.hitState(cx, cy);
     if (!id || !this.isOwnControllable(id)) return false;
 
-    // 修复手机端bug: 如果当前是捏合缩放状态,不启动出兵选择
-    if (this.camera && this.camera['pointers'] && this.camera['pointers'].size >= 2) {
-      return false;
-    }
-
+    this.selectionBeforeDrag = { selected: this.selected, origins: new Set(this.origins) };
     this.dragging = true;
-    this.dragStartedSelected = this.selected === id && this.origins.has(id);
-
-    // 修复合兵功能: 如果已有起点且点击新的己方州,累积而不是重置
-    if (this.origins.size > 0 && !this.origins.has(id)) {
-      this.origins.add(id);
-    } else if (this.origins.size === 0) {
-      this.origins = new Set([id]);
-    }
-    // 如果点击已选中的州,保持origins不变(允许重新拖动)
-
+    this.dragStartedSelected = this.selected === id;
+    this.dragMoved = false;
+    this.dragStart = { x: cx, y: cy };
+    this.lastDragPoint = this.dragStart;
+    this.dragCandidate = id;
+    this.origins = new Set([id]);
     this.selected = id;
     this.dragTarget = null;
     this.dragPointer = this.clientToSvg(cx, cy);
@@ -198,56 +211,45 @@ export class GameView {
 
   private selectMove(cx: number, cy: number) {
     if (!this.dragging || !this.snap) return;
+    if (!this.dragMoved && Math.hypot(cx - this.dragStart.x, cy - this.dragStart.y) < 12) return;
+    this.dragMoved = true;
     this.dragPointer = this.clientToSvg(cx, cy);
-    const id = this.hitState(cx, cy);
-    if (id && this.isOwnControllable(id)) {
-      // Own state not already an origin → reinforce destination (A→own B).
-      if (!this.origins.has(id) && this.origins.size > 0) {
-        this.dragTarget = id;
-      } else {
-        this.origins.add(id);
-        this.selected = id;
-        this.dragTarget = null;
+    const previousSize = this.origins.size;
+    const previousTarget = this.dragTarget;
+    const distance = Math.hypot(cx - this.lastDragPoint.x, cy - this.lastDragPoint.y);
+    const samples = Math.max(1, Math.ceil(distance / 14));
+    for (let i = 1; i <= samples; i++) {
+      const x = this.lastDragPoint.x + ((cx - this.lastDragPoint.x) * i) / samples;
+      const y = this.lastDragPoint.y + ((cy - this.lastDragPoint.y) * i) / samples;
+      const id = this.hitState(x, y, false) ?? null;
+      if (id === this.dragCandidate) continue;
+      if (this.dragCandidate && this.isOwnControllable(this.dragCandidate)) {
+        this.origins.add(this.dragCandidate);
       }
-    } else if (id) {
-      const info = this.snap.states[id];
-      if (info?.visible && !this.origins.has(id)) this.dragTarget = id;
-      else this.dragTarget = null;
-    } else {
-      this.dragTarget = null;
+      this.dragCandidate = id && this.isOwnControllable(id) ? id : null;
+      this.dragTarget = id && this.snap.states[id]?.visible && !this.origins.has(id) ? id : null;
     }
-    this.paintDragLine();
-    this.refreshPick();
+    this.lastDragPoint = { x: cx, y: cy };
+    if (previousSize !== this.origins.size || previousTarget !== this.dragTarget) this.refreshPick();
+    else this.paintDragLine();
   }
 
   private selectEnd(cx: number, cy: number) {
     if (!this.dragging) return;
+    if (Math.hypot(cx - this.dragStart.x, cy - this.dragStart.y) >= 12) this.selectMove(cx, cy);
     this.dragging = false;
-    const over = this.hitState(cx, cy);
-    const target = over ?? this.dragTarget;
-    if (target && this.origins.size) {
+    const target = this.dragMoved ? this.hitState(cx, cy) : null;
+    if (target && this.snap?.states[target]?.visible && !this.origins.has(target) && this.origins.size) {
       for (const from of this.origins) {
-        if (from === target) continue;
         this.dispatchSend(from, target);
       }
-      this.dragTarget = null;
-      this.paintDragLine();
-      this.refreshPick();
-      // 修复 P0-7: 出兵成功后保留起点,支持连续操作
-      // 不清空 selected 和 origins,玩家可以连续点击邻州
-      return;
-    }
-    // No target: short re-tap on already-selected origin cancels; otherwise keep last origin.
-    if (this.dragStartedSelected && this.origins.size === 1) {
+    } else if (!this.dragMoved && this.dragStartedSelected) {
       this.selected = null;
       this.origins.clear();
-    } else if (this.origins.size) {
-      const last = [...this.origins].pop()!;
-      this.selected = last;
-      this.origins = new Set([last]);
     }
+    this.selectionBeforeDrag = null;
+    this.dragCandidate = null;
     this.dragTarget = null;
-    this.paintDragLine();
     this.refreshPick();
   }
 
@@ -318,7 +320,7 @@ export class GameView {
     const cam = this.camera;
     let best = "";
     // 修复手机端bug: 扩大nearestState查找半径,手指粗点也能准确识别
-    let bestD = 45;
+    let bestD = 24;
     for (const s of Object.values(MAP.states)) {
       const sx = cam.x + (ox + s.cx * contain) * cam.scale;
       const sy = cam.y + (oy + s.cy * contain) * cam.scale;
@@ -334,8 +336,25 @@ export class GameView {
   private snap: RoomSnapshot | null = null;
 
   render(snap: RoomSnapshot) {
+    if (this.snap?.phase !== snap.phase || this.snap.code !== snap.code) {
+      this.selected = null;
+      this.origins.clear();
+      this.dragTarget = null;
+      this.pendingSends = [];
+      this.troopDisplays.clear();
+      for (const stream of this.streams.values()) stream.root.remove();
+      this.streams.clear();
+      this.framed = false;
+    } else {
+      this.pendingSends = this.pendingSends.filter((send) => !send.acked);
+    }
     this.snap = snap;
     const me = snap.players.find((p) => p.id === snap.you);
+    const live = new Set(snap.armies.map((a) => a.id));
+    for (const a of snap.armies) this.upsertStream(a);
+    for (const [id, stream] of [...this.streams]) {
+      if (!live.has(id)) this.removeStream(stream);
+    }
     for (const s of Object.values(MAP.states)) {
       const path = this.svg.getElementById(`st-${s.id}`) as SVGPathElement | null;
       if (!path) continue;
@@ -343,24 +362,11 @@ export class GameView {
       path.classList.remove("fog", "empty", "trump", "biden", "mine", "pick", "target", "flash");
       if (!info?.visible) {
         path.classList.add("fog");
+        this.troopDisplays.delete(s.id);
         this.hideLabel(s.id);
         continue;
       }
-      const predF = this.pendingOwner.get(s.id);
-      const confirmed = !!(predF && info.faction === predF);
-      if (confirmed) {
-        // 占领确认时,服务器已经将剩余兵力写入 info.troops
-        // 清理本地模拟状态,直接使用服务器数据
-        this.pendingDmg.set(s.id, 0);
-        this.pendingOwner.delete(s.id);
-        this.sieges.delete(s.id);
-        this.captureHold.delete(s.id);
-      }
-      const sg = this.sieges.get(s.id);
-      let faction = info.faction;
-      if (sg && sg.def > 0) faction = info.faction;
-      else if (sg && sg.atk > 0) faction = sg.faction;
-      else if (predF) faction = predF;
+      const faction = info.faction;
       if (!faction) path.classList.add("empty");
       else path.classList.add(faction);
       const mineFaction = me?.faction;
@@ -380,36 +386,7 @@ export class GameView {
       }
       if (this.dragTarget === s.id) path.classList.add("target");
       const isOrigin = this.origins.has(s.id) || this.selected === s.id;
-      const snapT = info.troops ?? 0;
-      const prevT = this.lastSnapTroops.get(s.id);
-
-      // 修复严重bug: 删除render中的sendHold清理逻辑,避免与upsertStream双重清理
-      // sendHold只在upsertStream中精确清理(收到army时)
-      if (prevT != null && snapT < prevT) {
-        const pend = this.pendingDmg.get(s.id) ?? 0;
-        this.pendingDmg.set(s.id, Math.max(0, pend - (prevT - snapT)));
-      }
-
-      if (prevT != null && snapT > prevT) {
-        const add = snapT - prevT;
-        const rh = this.reinforceHold.get(s.id) ?? 0;
-        if (rh > 0) {
-          // 修复严重bug: reinforceHold精确清理,避免累积导致数字虚高
-          const cleared = Math.min(rh, add);
-          const next = rh - cleared;
-          if (next > 0) this.reinforceHold.set(s.id, next);
-          else this.reinforceHold.delete(s.id);
-        }
-      }
-
-      // 修复 P0-6: 老家从0恢复产兵时,清理所有状态让数字正常增长
-      if (prevT === 0 && snapT > 0) {
-        this.pendingDmg.set(s.id, 0);
-        this.sendHold.delete(s.id);
-        this.reinforceHold.delete(s.id);
-      }
-      this.lastSnapTroops.set(s.id, snapT);
-      let shown = this.shownTroops(s.id, info);
+      const shown = this.updateTroopDisplay(s.id, info, snap);
       this.upsertLabel(
         s.id,
         isOrigin ? `${labelZh(s.id)} · 起点` : labelZh(s.id),
@@ -420,18 +397,6 @@ export class GameView {
     }
     this.paintOrigin();
     this.paintDragLine();
-
-    const live = new Set(snap.armies.map((a) => a.id));
-    for (const a of snap.armies) {
-      if (this.consumedIds.has(a.id)) continue;
-      this.upsertStream(a);
-    }
-    for (const [id, stream] of [...this.streams]) {
-      if (this.consumedIds.has(id)) continue;
-      if (live.has(id)) continue;
-      if (stream.p < 1) continue;
-      this.removeStream(stream);
-    }
 
     if (snap.events.length) this.playEvents(snap.events);
 
@@ -445,9 +410,7 @@ export class GameView {
       this.framed = false;
     }
 
-    const tip = document.getElementById("callout");
-    if (tip && this.hover) this.tip(this.hover);
-    else if (tip && me && this.selected) this.tip(this.selected);
+    this.tip(this.hover ?? this.selected ?? undefined);
   }
 
   private upsertLabel(id: string, zh: string, n: string, cx: number, cy: number) {
@@ -478,78 +441,72 @@ export class GameView {
     if (row) row.g.style.display = "none";
   }
 
-  private noteSend(from: string) {
-    const info = this.snap?.states[from];
-    if (!info) return;
-    const n = this.shownTroops(from, info);
-    if (n <= 0) return;
-    // 修复 Bug: 避免重复记录导致翻倍
-    // 只记录一次,不累加到 sendHold (sendHold 会在 upsertStream 时处理)
-    this.sendLog.push({ from, n });
+  revertLastSend() {
+    this.pendingSends.shift();
+    this.paintNumbers();
   }
 
-  revertLastSend() {
-    const last = this.sendLog.pop();
-    if (!last) return;
-    const left = (this.sendHold.get(last.from) ?? 0) - last.n;
-    if (left > 0) this.sendHold.set(last.from, left);
-    else this.sendHold.delete(last.from);
+  confirmSend(from: string, to: string) {
+    const send = this.pendingSends.find((s) => s.from === from && s.to === to && !s.acked);
+    if (send) send.acked = true;
+  }
+
+  reset() {
+    this.snap = null;
+    this.selected = null;
+    this.origins.clear();
+    this.dragTarget = null;
+    this.dragging = false;
+    this.selectionBeforeDrag = null;
+    this.dragCandidate = null;
+    this.pendingSends = [];
+    this.troopDisplays.clear();
+    for (const stream of this.streams.values()) this.removeStream(stream);
+    this.framed = false;
+    this.paintOrigin();
+    this.paintDragLine();
+    this.tip();
   }
 
   dispatchSend(from: string, to: string) {
-    // 修复严重bug: 出兵时应该用shownTroops获取实际可出兵数,而不是服务器快照
     const info = this.snap?.states[from];
-    if (!info) return;
-
+    if (!info || !this.isOwnControllable(from) || !this.snap?.states[to]?.visible || from === to) return;
     const actualTroops = this.shownTroops(from, info);
     if (actualTroops <= 0) return;
-
-    // 根据当前ratio计算实际出兵数
-    const sendCount = Math.floor(actualTroops * this.ratio);
-    if (sendCount <= 0) return;
-
-    // 立即从显示中扣除,避免延迟感
-    this.sendHold.set(from, (this.sendHold.get(from) ?? 0) + sendCount);
-
-    this.onSend(from, to, this.ratio);
+    if (this.onSend(from, to)) {
+      this.pendingSends.push({ from, to, n: actualTroops, acked: false });
+      this.paintNumbers();
+    }
   }
 
   private shownTroops(id: string, info: { troops?: number | null } | undefined): number {
-    const snapT = info?.troops ?? 0;
-    const sg = this.sieges.get(id);
+    const outgoing = this.pendingSends.reduce((sum, send) => sum + (send.from === id ? send.n : 0), 0);
+    return Math.max(0, (info?.troops ?? 0) - outgoing);
+  }
 
-    if (sg && sg.def > 0) {
-      return Math.max(0, Math.ceil(sg.def));
+  private displayTroops(id: string, now = performance.now()): number {
+    const display = this.troopDisplays.get(id);
+    if (!display) return 0;
+    const progress = Math.min(1, (now - display.start) / DAMAGE_TWEEN_MS);
+    return Math.ceil(display.from + (display.target - display.from) * progress);
+  }
+
+  private updateTroopDisplay(id: string, info: StateView, snap: RoomSnapshot): number {
+    const target = this.shownTroops(id, info);
+    const previous = this.troopDisplays.get(id);
+    const now = performance.now();
+    if (target !== previous?.target || previous.ownerId !== info.ownerId || previous.faction !== info.faction) {
+      const animate = previous && snap.phase === "playing" && info.ownerId !== snap.you &&
+        previous.ownerId === info.ownerId && previous.faction === info.faction && target < previous.target;
+      this.troopDisplays.set(id, {
+        from: animate ? this.displayTroops(id, now) : target,
+        target,
+        start: now,
+        ownerId: info.ownerId,
+        faction: info.faction,
+      });
     }
-    if (sg && sg.atk > 0) {
-      return Math.max(1, Math.ceil(sg.atk));
-    }
-
-    // 修复: 打平时清理siege,返回服务器兵力
-    if (sg && sg.def <= 0 && sg.atk <= 0) {
-      this.sieges.delete(id);
-      this.captureHold.delete(id);
-      return Math.max(1, Math.ceil(snapT));
-    }
-
-    const hold = this.captureHold.get(id);
-    if (hold && snapT <= 0) {
-      return hold;
-    }
-    if (hold && snapT > 0) this.captureHold.delete(id);
-
-    // 修复严重bug: sendHold是已扣除的兵力,应该减去而不是加上
-    const outgoing = this.sendHold.get(id) ?? 0;
-    const base = snapT + (this.reinforceHold.get(id) ?? 0) - outgoing;
-    const pending = this.pendingDmg.get(id) ?? 0;
-
-    // 修复0兵bug: 如果pendingDmg超过实际可用兵力,自动校准防止负数
-    if (pending > base && base >= 0) {
-      this.pendingDmg.set(id, Math.max(0, base));
-    }
-
-    const shown = Math.max(0, Math.round(base - (this.pendingDmg.get(id) ?? 0)));
-    return shown;
+    return this.displayTroops(id, now);
   }
 
   private paintNumbers() {
@@ -562,12 +519,16 @@ export class GameView {
       if (!row) continue;
       const isOrigin = this.origins.has(s.id) || this.selected === s.id;
       row.zh.textContent = isOrigin ? `${labelZh(s.id)} · 起点` : labelZh(s.id);
-      row.n.textContent = String(this.shownTroops(s.id, info));
+      const target = this.shownTroops(s.id, info);
+      if (info.ownerId === snap.you) {
+        this.troopDisplays.set(s.id, { from: target, target, start: performance.now(), ownerId: info.ownerId, faction: info.faction });
+      }
+      row.n.textContent = String(info.ownerId === snap.you ? target : this.displayTroops(s.id));
     }
   }
 
   private upsertStream(a: ArmyView) {
-    const duration = durationMs(a.from, a.to);
+    const duration = a.travelMs;
     let s = this.streams.get(a.id);
     if (!s) {
       const root = el("g", { class: `army ${a.faction}` });
@@ -580,14 +541,13 @@ export class GameView {
         p: 0,
         start: 0,
         duration,
-        arrivedAt: 0,
-        appliedDmg: false,
+        arrivedAt: null,
+        combatDuration: 1000,
+        combatDepth: 18,
         cols: 0,
+        nextSlot: 0,
         root,
-        line: null,
-        head: root,
         trailHeads: [],
-        num: el("text", {}),
       };
       const seed = progressOf(a);
       s.p = seed;
@@ -597,19 +557,17 @@ export class GameView {
       this.ensureHeads(s, n0);
       this.armyLayer.appendChild(root);
       this.streams.set(a.id, s);
-
-      // 修复严重bug: 服务器返回的army已经是扣除后的,不需要再从sendHold扣除
-      // 只需要清理本地预测的sendHold,避免重复扣除
-      const held = this.sendHold.get(a.from) ?? 0;
-      if (held > 0) {
-        const consumed = Math.min(held, Math.floor(a.troops));
-        const next = held - consumed;
-        if (next > 0) this.sendHold.set(a.from, next);
-        else this.sendHold.delete(a.from);
-      }
     }
     s.from = a.from;
     s.to = a.to;
+    s.troops = a.troops;
+    this.ensureHeads(s, Math.max(1, Math.min(30, Math.floor(a.troops))));
+    const seed = progressOf(a);
+    const now = performance.now();
+    if (a.arrived && s.arrivedAt === null) this.startCombat(s, now);
+    const local = Math.min(1, (now - s.start) / duration);
+    // Keep small network timing differences from rewinding the marching heads.
+    if (seed > local || local - seed > 0.12) s.start = now - seed * duration;
     s.duration = duration;
   }
 
@@ -617,6 +575,7 @@ export class GameView {
     const size = 14; // 提升到14px,手机端更清晰
     while (s.trailHeads.length < n) {
       const g = el("g", { class: "trail-head-wrap", opacity: "0" });
+      g.dataset.slot = String(s.nextSlot++);
 
       // 修复移动端bug: 不使用foreignObject+img,改用SVG circle+image避免兼容性问题
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -662,8 +621,20 @@ export class GameView {
       s.trailHeads.push(g);
     }
     while (s.trailHeads.length > n) {
-      s.trailHeads.pop()?.remove();
+      s.trailHeads.shift()?.remove();
     }
+  }
+
+  private startCombat(s: Stream, now: number) {
+    s.arrivedAt = now;
+    const from = MAP.states[s.from];
+    const to = MAP.states[s.to];
+    const distance = from && to ? Math.hypot(to.cx - from.cx, to.cy - from.cy) : 100;
+    const gap = Math.max(18, distance * 0.08);
+    const lastSlot = Number(s.trailHeads.at(-1)?.dataset.slot ?? 0);
+    s.combatDepth = Math.max(18, Math.floor(lastSlot / s.cols) * gap);
+    const defender = this.snap?.states[s.to]?.troops ?? s.troops;
+    s.combatDuration = Math.max(400, estimateCombatSeconds(s.troops, defender) * 1000);
   }
 
   private originBound = false;
@@ -715,7 +686,7 @@ export class GameView {
         this.upsertLabel(
           s.id,
           zh,
-          this.snap.phase === "lobby" ? "" : String(this.shownTroops(s.id, info)),
+          this.snap.phase === "lobby" ? "" : String(this.displayTroops(s.id)),
           s.cx,
           s.cy,
         );
@@ -723,6 +694,7 @@ export class GameView {
     }
     this.paintOrigin();
     this.paintDragLine();
+    this.tip(this.hover ?? this.selected ?? undefined);
   }
 
   private clickState(id: string) {
@@ -739,7 +711,14 @@ export class GameView {
       return;
     }
 
-    // 点击目标州 → 出兵
+    if (this.isOwnControllable(id)) {
+      this.origins = new Set([id]);
+      this.selected = id;
+      this.refreshPick();
+      return;
+    }
+
+    // A tap on a visible target sends only the explicitly selected origins.
     if (this.selected && this.selected !== id && info?.visible) {
       const froms = this.origins.size ? [...this.origins] : [this.selected];
       for (const from of froms) {
@@ -747,50 +726,35 @@ export class GameView {
         this.dispatchSend(from, id);
       }
       this.dragTarget = null;
-      // 修复合兵功能: 出兵后不清空origins,支持连续操作
-      // this.origins.clear();
       this.refreshPick();
       return;
     }
 
-    // 点击己方州 → 累积到origins
-    if (info?.visible && info.ownerId === snap.you) {
-      const me = snap.players.find((p) => p.id === snap.you);
-      if (snap.mode === "2v2" && me && controlBank(id) !== me.zone) {
-        this.selected = null;
-        this.origins.clear();
-        this.refreshPick();
-        return;
-      }
-
-      // 修复合兵功能: 连续点击己方州时累积,而不是重置
-      if (this.origins.size > 0) {
-        this.origins.add(id);  // 累积
-      } else {
-        this.origins = new Set([id]);  // 首次选择
-      }
-
-      this.selected = id;
-      this.tip(id);
-      this.refreshPick();
-    } else {
-      this.selected = null;
-      this.origins.clear();
-      this.refreshPick();
-    }
+    this.selected = null;
+    this.origins.clear();
+    this.refreshPick();
   }
 
-  private tip(id: string) {
-    const s = MAP.states[id];
-    const info = this.snap?.states[id];
+  private tip(id?: string) {
     const elTip = document.getElementById("callout");
-    if (!s || !elTip) return;
+    if (!elTip) return;
+    const title = elTip.querySelector("strong");
+    const detail = elTip.querySelector("span");
+    if (!title || !detail) return;
+    if (!id || !MAP.states[id]) {
+      title.textContent = "州名";
+      detail.textContent = "点己方州，有视野就能出兵";
+      return;
+    }
+    const info = this.snap?.states[id];
     if (!info?.visible) {
-      elTip.innerHTML = `<strong>迷雾</strong><span>尚未侦察</span>`;
+      title.textContent = "迷雾";
+      detail.textContent = "尚未侦察";
       return;
     }
     const owner = this.snap?.players.find((p) => p.id === info.ownerId);
-    elTip.innerHTML = `<strong>${labelEn(id)}</strong><span>${labelZh(id)} · ${owner ? owner.name : "中立"} · ${info.troops ?? 0} 兵</span>`;
+    title.textContent = labelEn(id);
+    detail.textContent = `${labelZh(id)} · ${owner ? owner.name : "中立"} · ${info.troops ?? 0} 兵`;
   }
 
   private playEvents(events: GameEvent[]) {
@@ -838,58 +802,24 @@ export class GameView {
     const dt = this.lastTs ? Math.min(0.05, (ts - this.lastTs) / 1000) : 0.016;
     this.lastTs = ts;
     const now = performance.now();
-    // 修复 P0-2: 客户端持续模拟交火,实时扣血
-    for (const [id, sg] of this.sieges) {
-      sg.acc += dt;
-      while (sg.acc >= 0.25 && sg.def > 0 && sg.atk > 0) {
-        sg.acc -= 0.25;
-        sg.def -= 1;
-        sg.atk -= 1;
-      }
-      // 修复: 攻击方胜利时标记预期占领者
-      if (sg.def <= 0 && sg.atk > 0) {
-        this.pendingOwner.set(id, sg.faction);
-      }
-      // 修复: 打平时清理本地模拟,让服务器快照决定
-      if (sg.def <= 0 && sg.atk <= 0) {
-        this.sieges.delete(id);
-      }
+    for (const [id, display] of this.troopDisplays) {
+      if (display.from === display.target) continue;
+      const row = this.labels.get(id);
+      if (row) row.n.textContent = String(this.displayTroops(id, now));
+      if (now - display.start >= DAMAGE_TWEEN_MS) display.from = display.target;
     }
-    for (const s of [...this.streams.values()]) {
+    for (const s of this.streams.values()) {
       s.p = Math.max(0, Math.min(1, (now - s.start) / s.duration));
+      if (s.p >= 1 && s.arrivedAt === null) this.startCombat(s, now);
       const a = MAP.states[s.from];
       const b = MAP.states[s.to];
       if (!a || !b) continue;
 
       const dx0 = b.cx - a.cx;
       const dy0 = b.cy - a.cy;
-      const dist0 = Math.hypot(dx0, dy0) || 1;
-      if (!s.appliedDmg && s.p * dist0 >= dist0 - 16) {
-        s.appliedDmg = true;
-        const dest = this.snap?.states[s.to];
-        const alreadyMine = dest && (dest.ownerId === this.snap?.you || dest.faction === s.faction);
-        if (alreadyMine && dest) {
-          this.reinforceHold.set(s.to, (this.reinforceHold.get(s.to) ?? 0) + Math.floor(s.troops));
-        } else if (dest) {
-          const prev = this.sieges.get(s.to);
-          this.sieges.set(s.to, {
-            def: prev ? prev.def : Math.floor(dest.troops ?? 0),
-            atk: (prev?.atk ?? 0) + Math.floor(s.troops),
-            faction: s.faction,
-            acc: prev ? prev.acc : 0.25,
-          });
-        }
-      }
-      if (s.p >= 1) {
-        this.pendingDmg.set(s.from, (this.pendingDmg.get(s.from) ?? 0) + Math.floor(s.troops));
-        this.consumedIds.add(s.id);
-        this.removeStream(s);
-        continue;
-      }
-
-      const dx = b.cx - a.cx;
-      const dy = b.cy - a.cy;
-      const dist = Math.hypot(dx, dy) || 1;
+      const dist = Math.hypot(dx0, dy0) || 1;
+      const dx = dx0;
+      const dy = dy0;
       const ux = dx / dist;
       const uy = dy / dist;
       const px = -uy;
@@ -902,51 +832,58 @@ export class GameView {
       const front = s.p * dist;
       for (let i = 0; i < n; i++) {
         const th = s.trailHeads[i];
-        const col = cols === 1 ? 0 : i % cols;
-        const row = cols === 1 ? i : Math.floor(i / cols);
+        const slot = Number(th.dataset.slot);
+        const col = cols === 1 ? 0 : slot % cols;
+        const row = cols === 1 ? slot : Math.floor(slot / cols);
         const side = (col - (cols - 1) / 2) * sideGap;
-        const along = front - row * alongGap;
-        if (along < 4) {
+        let along = front - row * alongGap;
+        let opacity = 0.96;
+        if (s.arrivedAt !== null) {
+          const head = combatHeadAt(row, alongGap, s.combatDepth, now - s.arrivedAt, s.combatDuration);
+          along = dist - head.back;
+          opacity *= head.opacity;
+        }
+        if (along < 4 || opacity <= 0) {
           th.setAttribute("opacity", "0");
           continue;
         }
         const x = a.cx + ux * along + px * side;
         const y = a.cy + uy * along + py * side;
         // 修复手机端bug: 提升头像不透明度,强光下更清晰
-        th.setAttribute("opacity", "0.96");
+        th.setAttribute("opacity", String(opacity));
         th.setAttribute("transform", `translate(${x},${y})`);
       }
     }
 
-    this.paintNumbers();
     const canvas = this.fx;
-    const w = this.svg.clientWidth || 960;
-    const h = this.svg.clientHeight || 600;
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w;
-      canvas.height = h;
+    if (this.floaters.length) {
+      const w = this.svg.clientWidth || 960;
+      const h = this.svg.clientHeight || 600;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      const sx = w / 960;
+      const sy = h / 600;
+      const c = this.ctx;
+      c.clearRect(0, 0, w, h);
+      c.font = "600 13px 'Noto Sans SC', sans-serif";
+      c.textAlign = "center";
+      this.floaters = this.floaters.filter((f) => f.life > 0);
+      for (const f of this.floaters) {
+        f.y += f.vy * dt;
+        f.life -= dt * 1.4;
+        c.globalAlpha = Math.max(0, f.life);
+        c.fillStyle = f.color;
+        c.fillText(f.text, f.x * sx, f.y * sy);
+      }
+      c.globalAlpha = 1;
     }
-    const sx = w / 960;
-    const sy = h / 600;
-    const c = this.ctx;
-    c.clearRect(0, 0, w, h);
-    c.font = "600 13px 'Noto Sans SC', sans-serif";
-    c.textAlign = "center";
-    this.floaters = this.floaters.filter((f) => f.life > 0);
-    for (const f of this.floaters) {
-      f.y += f.vy * dt;
-      f.life -= dt * 1.4;
-      c.globalAlpha = Math.max(0, f.life);
-      c.fillStyle = f.color;
-      c.fillText(f.text, f.x * sx, f.y * sy);
-    }
-    c.globalAlpha = 1;
     requestAnimationFrame(this.tick);
   };
 
   private removeStream(s: Stream) {
     s.root.remove();
-    s.line?.remove();
     this.streams.delete(s.id);
   }
 }
@@ -961,13 +898,9 @@ function progressOf(a: ArmyView): number {
   return Math.max(0, Math.min(1, ((a.x - from.cx) * dx + (a.y - from.cy) * dy) / (len * len)));
 }
 
-function durationMs(from: string, to: string) {
-  const a = MAP.states[from];
-  const b = MAP.states[to];
-  if (!a || !b) return 2000;
-  const dist = Math.hypot(b.cx - a.cx, b.cy - a.cy);
-  const seconds = armyTravelSeconds(dist);
-  return seconds * 1000;
+export function combatHeadAt(row: number, gap: number, depth: number, elapsedMs: number, durationMs: number) {
+  const back = row * gap - Math.min(1, elapsedMs / durationMs) * depth;
+  return { back, opacity: Math.min(1, Math.max(0, back) / 8) };
 }
 
 function el<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record<string, string>): SVGElementTagNameMap[K] {

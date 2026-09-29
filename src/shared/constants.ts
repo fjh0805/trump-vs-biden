@@ -17,7 +17,6 @@ export const PROD_MS = BALANCE.PROD_INTERVAL_SEC * 1000;
 export const HOME_PROD_MS = BALANCE.HOME_PROD_INTERVAL_SEC * 1000;
 export const COMBAT_LOSS = BALANCE.COMBAT_KILL_PER_TICK;
 export const COMBAT_MS = BALANCE.COMBAT_TICK_SEC * 1000;
-export const DEFAULT_SEND: number = BALANCE.DEFAULT_SEND_RATIO;
 export const HOME_TROOPS = BALANCE.HOME_START_TROOPS;
 export const NEUTRAL_SMALL = BALANCE.NEUTRAL_START.small;
 export const NEUTRAL_MED = BALANCE.NEUTRAL_START.medium;
@@ -76,9 +75,11 @@ export function resolveHome(faction: Faction, pick: string, zone?: Zone): HomeId
   return list[Math.floor(Math.random() * list.length)];
 }
 
-/** 统一的行军时长计算(秒) - 客户端和服务端共用 */
-export function armyTravelSeconds(distanceInMapUnits: number): number {
-  return Math.min(4.6, Math.max(1.15, distanceInMapUnits / 140));
+/** 按路程与出发兵力计算行军时长，客户端从快照读取该值。 */
+export function armyTravelSeconds(distanceInMapUnits: number, troops = 1): number {
+  const base = Math.min(5.8, Math.max(1.5, distanceInMapUnits / 115));
+  const pace = 1 + Math.min(0.4, Math.max(0, troops - 1) / 80);
+  return base / pace;
 }
 
 export const ADJACENT: Record<string, string[]> = {
