@@ -56,6 +56,65 @@ test("a surviving attacker captures the state with their remaining troops", () =
   assert.equal(state.territories.OK.troops, 1);
   assert.equal(state.armies.length, 0);
   assert.equal(events.filter((event) => event.kind === "capture").length, 1);
+  assert.equal(state.phase, "ended");
+  assert.equal(state.winner, "trump");
+  assert.match(state.reason, /领土与部队全部失去/);
+});
+
+test("the last territory falling ends the match without waiting for the clock", () => {
+  const state = match();
+  state.territories.OK.troops = 0.95;
+  state.armies.push(army("a1", "red", "trump", "TX", "OK", 2));
+  step(state);
+  assert.equal(state.tick, 1);
+  assert.equal(state.phase, "ended");
+  assert.equal(state.winner, "trump");
+  assert.ok(state.endedAt > 0);
+  const tick = state.tick;
+  assert.deepEqual(step(state), []);
+  assert.equal(state.tick, tick);
+});
+
+test("a faction with no territory but a surviving army can still counterattack", () => {
+  const state = match();
+  state.territories.OK.troops = 0.95;
+  state.armies.push(army("a1", "red", "trump", "TX", "OK", 2));
+  const blue = army("a2", "blue", "biden", "OK", "TX", 2);
+  blue.progress = 0;
+  blue.arrived = false;
+  state.armies.push(blue);
+  step(state);
+  assert.equal(state.territories.OK.ownerId, "red");
+  assert.equal(state.phase, "playing");
+  assert.equal(state.winner, undefined);
+
+  blue.progress = 0.99;
+  blue.speed = 0.01;
+  for (let i = 0; i < 10 && state.phase === "playing"; i++) step(state);
+  assert.equal(state.phase, "ended");
+  assert.equal(state.winner, "trump");
+});
+
+test("a 2v2 teammate's territory prevents premature elimination", () => {
+  const state = match();
+  state.mode = "2v2";
+  state.players.push({ id: "mate", faction: "biden", home: "NY", isAI: false });
+  state.territories.NY = { ownerId: "mate", troops: 12, startTroops: 12 };
+  state.territories.OK.troops = 0.95;
+  state.armies.push(army("a1", "red", "trump", "TX", "OK", 2));
+
+  step(state);
+  assert.equal(state.territories.OK.ownerId, "red");
+  assert.equal(state.phase, "playing");
+});
+
+test("both eliminated armies and territories produce a draw", () => {
+  const state = match();
+  state.territories.TX.ownerId = null;
+  state.territories.OK.ownerId = null;
+  step(state);
+  assert.equal(state.phase, "ended");
+  assert.equal(state.winner, "draw");
 });
 
 test("large field clashes resolve faster than one soldier per strike", () => {

@@ -118,3 +118,31 @@ test("AI handover tells the remaining player to drop the disconnected voice peer
   assert.equal(game.memory.players[1].isAI, true);
   assert.deepEqual(sockets[0].messages.at(-1), { type: "peers", ids: [] });
 });
+
+test("the final capture broadcasts an ended snapshot to the defeated player", async () => {
+  const sockets = [socket("ACDE"), socket("ACDE")];
+  const game = room(sockets);
+  await game.onHello(sockets[0], {
+    type: "hello", playerId: "host", roomToken: crypto.randomUUID(),
+    name: "host", code: "ACDE", intent: "create", home: "TX",
+  });
+  await game.onHello(sockets[1], {
+    type: "hello", playerId: "guest", roomToken: crypto.randomUUID(),
+    name: "guest", code: "ACDE", intent: "join",
+  });
+  await game.webSocketMessage(sockets[0], JSON.stringify({ type: "start" }));
+  const state = game.memory;
+  const target = state.players.find((p) => p.id === "guest").home;
+  state.territories[target].troops = 0.9;
+  state.armies.push({
+    id: "a-test", ownerId: "host", faction: "trump", from: "TX", to: target,
+    troops: 2, progress: 1, speed: 0, x: 0, y: 0, arrived: true,
+  });
+
+  await game.alarm();
+  const last = sockets[1].messages.at(-1);
+  assert.equal(last.type, "snapshot");
+  assert.equal(last.phase, "ended");
+  assert.equal(last.winner, "trump");
+  assert.match(last.reason, /领土与部队全部失去/);
+});

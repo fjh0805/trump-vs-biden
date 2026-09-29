@@ -216,6 +216,12 @@ export function step(state: RoomState): GameEvent[] {
     end(state, "trump", `特朗普阵营占领 ${scores.trumpStates} 州，达 ${majority} 州获胜`);
   } else if (scores.bidenStates >= majority) {
     end(state, "biden", `拜登阵营占领 ${scores.bidenStates} 州，达 ${majority} 州获胜`);
+  } else if (scores.trumpStates === 0 && scores.bidenStates === 0 && state.armies.length === 0) {
+    end(state, "draw", "双方领土与部队均已耗尽");
+  } else if (scores.trumpStates === 0 && !state.armies.some((a) => a.faction === "trump" && a.troops > 0)) {
+    end(state, "biden", "特朗普阵营领土与部队全部失去");
+  } else if (scores.bidenStates === 0 && !state.armies.some((a) => a.faction === "biden" && a.troops > 0)) {
+    end(state, "trump", "拜登阵营领土与部队全部失去");
   } else if (timeUp) {
     if (scores.trumpStates > scores.bidenStates) end(state, "trump", "时间到：州数更多");
     else if (scores.bidenStates > scores.trumpStates) end(state, "biden", "时间到：州数更多");
