@@ -177,8 +177,8 @@ export class GameView {
       this.selected = null;
       this.origins.clear();
       this.dragTarget = null;
+      this.refreshPick();
     }
-    if (this.snap) this.render(this.snap);
   }
 
   private isOwnControllable(id: string): boolean {
@@ -355,6 +355,18 @@ export class GameView {
       this.pendingSends = this.pendingSends.filter((send) => !send.acked);
     }
     this.snap = snap;
+    for (const id of this.origins) {
+      if (!this.isOwnControllable(id)) this.origins.delete(id);
+    }
+    if (this.selected && !this.isOwnControllable(this.selected)) {
+      this.selected = this.origins.values().next().value ?? null;
+    }
+    if (!this.selected && this.dragging) {
+      this.dragging = false;
+      this.selectionBeforeDrag = null;
+      this.dragCandidate = null;
+      this.dragTarget = null;
+    }
     const me = snap.players.find((p) => p.id === snap.you);
     const live = new Set(snap.armies.map((a) => a.id));
     for (const a of snap.armies) this.upsertStream(a);

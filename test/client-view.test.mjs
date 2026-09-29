@@ -116,6 +116,66 @@ test("drag through owned states sends only the visited origins to the target", (
   assert.ok(!view.origins.has("CA"));
 });
 
+test("tapping the map does not replay events from the last snapshot", () => {
+  const view = Object.create(GameView.prototype);
+  let eventPlays = 0;
+  let picks = 0;
+  Object.assign(view, {
+    snap: { phase: "playing" },
+    hitState: () => "TX",
+    clickState: () => { picks++; },
+    render: () => { eventPlays++; },
+  });
+
+  view.tapAt(20, 30);
+  assert.equal(picks, 1);
+  assert.equal(eventPlays, 0);
+});
+
+test("a blank tap clears the selection and refreshes its highlight", () => {
+  const view = Object.create(GameView.prototype);
+  let refreshes = 0;
+  Object.assign(view, {
+    hitState: () => undefined,
+    selected: "TX",
+    origins: new Set(["TX"]),
+    dragTarget: "AR",
+    refreshPick: () => { refreshes++; },
+  });
+
+  view.tapAt(20, 30);
+  assert.equal(view.selected, null);
+  assert.equal(view.origins.size, 0);
+  assert.equal(view.dragTarget, null);
+  assert.equal(refreshes, 1);
+});
+
+test("a snapshot removes lost origins and keeps only controllable selected states", () => {
+  const snap = {
+    code: "TEST", phase: "playing", you: "me", mode: "1v1",
+    players: [{ id: "me", faction: "trump" }], armies: [], events: [],
+    states: {
+      TX: { visible: true, ownerId: "enemy", faction: "biden", troops: 8 },
+      OK: { visible: true, ownerId: "me", faction: "trump", troops: 5 },
+    },
+  };
+  const view = Object.create(GameView.prototype);
+  Object.assign(view, {
+    snap, svg: { getElementById: () => null }, streams: new Map(),
+    origins: new Set(["TX", "OK"]), selected: "TX", pendingSends: [],
+    paintOrigin: () => {}, paintDragLine: () => {}, tip: () => {},
+  });
+
+  view.render(snap);
+  assert.deepEqual([...view.origins], ["OK"]);
+  assert.equal(view.selected, "OK");
+
+  snap.states.OK.ownerId = "enemy";
+  view.render(snap);
+  assert.equal(view.selected, null);
+  assert.equal(view.origins.size, 0);
+});
+
 test("unchanged snapshots do not restyle states or interrupt their flash", () => {
   const classes = new Set(["flash"]);
   let mutations = 0;
