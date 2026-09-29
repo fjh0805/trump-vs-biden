@@ -203,6 +203,7 @@ export class MapCamera {
       if (this.selecting) this.onSelectCancel();
       this.selecting = false;
       this.multitouch = true;
+      if (this.pointers.size === 0) return;
     }
     if (this.selecting && this.pointers.size === 0) {
       this.selecting = false;

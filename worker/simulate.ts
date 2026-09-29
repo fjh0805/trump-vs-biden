@@ -277,8 +277,9 @@ function resolveClashes(state: RoomState, events: GameEvent[], strike: boolean) 
       if (!sameEdge && !near) continue;
       if (!near) continue;
       if (!strike) continue;
-      a.troops = Math.max(0, a.troops - BALANCE.COMBAT_KILL_PER_TICK);
-      b.troops = Math.max(0, b.troops - BALANCE.COMBAT_KILL_PER_TICK);
+      const loss = combatDamagePerStep(a.troops, b.troops, BALANCE.COMBAT_TICK_SEC * 1000);
+      a.troops = Math.max(0, a.troops - loss);
+      b.troops = Math.max(0, b.troops - loss);
       events.push({
         kind: "clash",
         x: (a.x + b.x) / 2,
@@ -357,8 +358,11 @@ function resolveSieges(state: RoomState, events: GameEvent[]) {
       events.push({ kind: "clash", x: meta.cx, y: meta.cy, state: to });
     }
     const survivors = assault.reduce((sum, a) => sum + a.troops, 0);
-    if (dest.troops <= 0) {
+    if (dest.troops <= 0 && survivors > 0) {
       captureWith(state, dest, to, assault, survivors, events);
+    } else if (dest.troops <= 0) {
+      // A mutual wipeout is a defended tie, not a capture by a nonexistent army.
+      dest.troops = 1;
     } else if (survivors > 0) {
       keep.push(...assault.filter((a) => a.troops > 0));
     }

@@ -116,6 +116,56 @@ test("drag through owned states sends only the visited origins to the target", (
   assert.ok(!view.origins.has("CA"));
 });
 
+test("canceling a drag after losing territory only restores controllable origins", () => {
+  const view = Object.create(GameView.prototype);
+  Object.assign(view, {
+    dragging: true, dragTarget: "AR", dragCandidate: "OK",
+    snap: {
+      phase: "playing", you: "me", mode: "1v1", players: [{ id: "me", zone: "west" }],
+      states: { TX: { visible: true, ownerId: "enemy" }, OK: { visible: true, ownerId: "me" } },
+    },
+    selected: "OK", origins: new Set(["OK"]),
+    selectionBeforeDrag: { selected: "TX", origins: new Set(["TX", "OK"]) },
+    refreshPick: () => {},
+  });
+
+  view.cancelSelection();
+  assert.deepEqual([...view.origins], ["OK"]);
+  assert.equal(view.selected, "OK");
+  assert.equal(view.dragging, false);
+  assert.equal(view.dragTarget, null);
+});
+
+test("a real state path wins over an overlapping small-state hit circle", () => {
+  const view = Object.create(GameView.prototype);
+  const previousDocument = globalThis.document;
+  const previousPath = globalThis.SVGPathElement;
+  const previousElement = globalThis.Element;
+  const previousHtml = globalThis.HTMLElement;
+  const previousSvg = globalThis.SVGElement;
+  class ElementStub {
+    constructor(state) { this.dataset = { state }; }
+    closest() { return this; }
+  }
+  class PathStub extends ElementStub {}
+  globalThis.Element = ElementStub;
+  globalThis.HTMLElement = ElementStub;
+  globalThis.SVGElement = ElementStub;
+  globalThis.SVGPathElement = PathStub;
+  globalThis.document = { elementsFromPoint: () => [new ElementStub("RI"), new PathStub("MA")] };
+  view.viewport = { getBoundingClientRect: () => ({ left: 0, top: 0, right: 100, bottom: 100 }) };
+  view.svg = { contains: () => true };
+  try {
+    assert.equal(view.hitState(50, 50), "MA");
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.SVGPathElement = previousPath;
+    globalThis.Element = previousElement;
+    globalThis.HTMLElement = previousHtml;
+    globalThis.SVGElement = previousSvg;
+  }
+});
+
 test("tapping the map does not replay events from the last snapshot", () => {
   const view = Object.create(GameView.prototype);
   let eventPlays = 0;

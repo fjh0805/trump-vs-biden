@@ -142,17 +142,7 @@ export class GameView {
     this.camera.onSelectMove = (x, y) => this.selectMove(x, y);
     this.camera.onSelectEnd = (x, y) => this.selectEnd(x, y);
     this.camera.canDoubleTapZoom = () => !this.selected;
-    this.camera.onSelectCancel = () => {
-      this.dragging = false;
-      this.dragTarget = null;
-      if (this.selectionBeforeDrag) {
-        this.selected = this.selectionBeforeDrag.selected;
-        this.origins = this.selectionBeforeDrag.origins;
-      }
-      this.selectionBeforeDrag = null;
-      this.dragCandidate = null;
-      this.refreshPick();
-    };
+    this.camera.onSelectCancel = () => this.cancelSelection();
     requestAnimationFrame((t) => this.tick(t));
   }
 
@@ -160,6 +150,9 @@ export class GameView {
     const rect = this.viewport.getBoundingClientRect();
     if (cx < rect.left || cx > rect.right || cy < rect.top || cy > rect.bottom) return;
     const stack = document.elementsFromPoint(cx, cy);
+    // Small-state hit circles can overlap a neighboring state's actual shape.
+    const path = stack.find((n) => n instanceof SVGPathElement && n.dataset.state && this.svg.contains(n));
+    if (path instanceof SVGPathElement) return path.dataset.state;
     for (const n of stack) {
       if (!(n instanceof Element) || !this.svg.contains(n)) continue;
       const hit = n.closest("[data-state]");
@@ -189,6 +182,20 @@ export class GameView {
     const me = snap.players.find((p) => p.id === snap.you);
     if (snap.mode === "2v2" && me && controlBank(id) !== me.zone) return false;
     return true;
+  }
+
+  private cancelSelection() {
+    this.dragging = false;
+    this.dragTarget = null;
+    if (this.selectionBeforeDrag) {
+      this.origins = new Set([...this.selectionBeforeDrag.origins].filter((id) => this.isOwnControllable(id)));
+      const selected = this.selectionBeforeDrag.selected;
+      this.selected = selected && this.isOwnControllable(selected)
+        ? selected : this.origins.values().next().value ?? null;
+    }
+    this.selectionBeforeDrag = null;
+    this.dragCandidate = null;
+    this.refreshPick();
   }
 
   private selectStart(cx: number, cy: number): boolean {
@@ -694,18 +701,19 @@ export class GameView {
       const path = this.svg.getElementById(`st-${s.id}`) as SVGPathElement | null;
       if (!path) continue;
       const info = this.snap.states[s.id];
-      const isOrigin = this.origins.has(s.id) || this.selected === s.id;
+      const visible = !!info?.visible;
+      const isOrigin = visible && (this.origins.has(s.id) || this.selected === s.id);
       path.classList.toggle("pick", isOrigin);
       path.classList.toggle(
         "target",
         !!(
-          info?.visible &&
+          visible &&
           (this.selected || this.origins.size) &&
           !isOrigin &&
           (this.dragTarget === s.id || !this.dragging)
         ),
       );
-      if (info?.visible && this.labels.get(s.id)) {
+      if (visible && this.labels.get(s.id)) {
         const zh = isOrigin ? `${labelZh(s.id)} · 起点` : labelZh(s.id);
         this.upsertLabel(
           s.id,

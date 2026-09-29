@@ -10,6 +10,7 @@ export class VoiceMesh {
   private muted = false;
   private speaking = false;
   private analyser: AnalyserNode | null = null;
+  private audioContext: AudioContext | null = null;
   private raf = 0;
   onSpeaking: (speaking: boolean) => void = () => {};
   send: SignalFn = () => {};
@@ -30,9 +31,18 @@ export class VoiceMesh {
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: false,
       });
+      this.local.getAudioTracks().forEach((track) => { track.enabled = !this.muted; });
       this.hookAnalyser();
+      for (const [id, peer] of this.peers) {
+        for (const track of this.local.getTracks()) peer.addTrack(track, this.local);
+        if (this.selfId < id && peer.signalingState === "stable") void this.offer(id).catch(() => {});
+      }
       return true;
     } catch {
+      cancelAnimationFrame(this.raf);
+      this.local?.getTracks().forEach((track) => track.stop());
+      void this.audioContext?.close();
+      this.audioContext = null;
       this.local = null;
       return false;
     }
@@ -89,6 +99,10 @@ export class VoiceMesh {
     for (const id of [...this.peers.keys()]) this.drop(id);
     this.local?.getTracks().forEach((t) => t.stop());
     this.local = null;
+    void this.audioContext?.close();
+    this.audioContext = null;
+    this.analyser = null;
+    this.speaking = false;
   }
 
   private ensure(id: string): RTCPeerConnection {
@@ -131,6 +145,7 @@ export class VoiceMesh {
 
   private async offer(id: string) {
     const pc = this.ensure(id);
+    if (pc.signalingState !== "stable") return;
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     this.send(id, { kind: "offer", sdp: offer.sdp ?? "" });
@@ -150,6 +165,7 @@ export class VoiceMesh {
   private hookAnalyser() {
     if (!this.local) return;
     const ac = new AudioContext();
+    this.audioContext = ac;
     const src = ac.createMediaStreamSource(this.local);
     const analyser = ac.createAnalyser();
     analyser.fftSize = 512;

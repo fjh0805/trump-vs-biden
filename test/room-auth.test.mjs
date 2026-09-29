@@ -104,3 +104,17 @@ test("a second player joins with an independent secret that is never broadcast",
   await game.webSocketMessage(sockets[0], JSON.stringify({ type: "start" }));
   assert.equal(game.memory.players.find((p) => p.id === "guest").roomToken, guestToken);
 });
+
+test("AI handover tells the remaining player to drop the disconnected voice peer", async () => {
+  const sockets = [socket("ACDE"), socket("ACDE")];
+  const game = room(sockets);
+  await game.onHello(sockets[0], { type: "hello", playerId: "host", roomToken: crypto.randomUUID(), name: "host", code: "ACDE", intent: "create" });
+  await game.onHello(sockets[1], { type: "hello", playerId: "guest", roomToken: crypto.randomUUID(), name: "guest", code: "ACDE", intent: "join" });
+  await game.webSocketMessage(sockets[0], JSON.stringify({ type: "start" }));
+  game.memory.players[1].connected = false;
+  game.memory.players[1].disconnectedAt = Date.now() - 20_000;
+  sockets[1].readyState = 3;
+  await game.alarm();
+  assert.equal(game.memory.players[1].isAI, true);
+  assert.deepEqual(sockets[0].messages.at(-1), { type: "peers", ids: [] });
+});

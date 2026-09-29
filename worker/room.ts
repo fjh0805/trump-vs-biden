@@ -86,35 +86,40 @@ export class GameRoom extends DurableObject<Env> {
   async alarm() {
     const state = await this.load();
     if (!state) return;
-    this.reapHold(state);
+    const handedToAI = this.reapHold(state);
     if (state.phase === "playing") {
       const events = step(state);
       this.pending.push(...events);
       await this.save(state);
       this.flush();
+      if (handedToAI) this.sendPeerLists();
       if (state.phase === "playing") await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
       return;
     }
+    await this.save(state);
     const host = state.players.find((p) => p.id === state.hostId);
     if (host && !host.connected && host.disconnectedAt && Date.now() - host.disconnectedAt < HOST_HOLD_MS) {
-      await this.save(state);
       await this.ctx.storage.setAlarm(Date.now() + 1000);
     }
   }
 
-  private reapHold(state: RoomState) {
+  private reapHold(state: RoomState): boolean {
     const now = Date.now();
+    let changed = false;
     for (const p of state.players) {
       if (p.connected || p.disconnectedAt <= 0) continue;
       if (!p.isHost && state.phase === "playing" && now - p.disconnectedAt >= PEER_WAIT_MS) {
+        changed ||= !p.isAI;
         p.aiHold = true;
         p.isAI = true;
       }
       if (p.isHost && state.phase === "playing" && now - p.disconnectedAt >= HOST_HOLD_MS) {
+        changed ||= !p.isAI;
         p.aiHold = true;
         p.isAI = true;
       }
     }
+    return changed;
   }
 
   private async handle(ws: WebSocket, msg: ClientToServer) {
