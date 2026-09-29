@@ -54,6 +54,21 @@ document.querySelectorAll("#faction button").forEach((b) => {
 $("btn-create").onclick = () => void enter("create");
 $("btn-join").onclick = () => void enter("join");
 $("btn-ai").onclick = () => void enter("create", true);
+const overviewButton = $<HTMLButtonElement>("btn-overview");
+overviewButton.onclick = () => {
+  if (!view) return;
+  if (overviewButton.getAttribute("aria-pressed") === "true") {
+    view.focusHome();
+    overviewButton.textContent = "全图";
+    overviewButton.setAttribute("aria-pressed", "false");
+    overviewButton.title = "查看整张地图";
+  } else {
+    view.camera.fitContain();
+    overviewButton.textContent = "聚焦";
+    overviewButton.setAttribute("aria-pressed", "true");
+    overviewButton.title = "回到己方老家";
+  }
+};
 $("btn-start").onclick = () => sock.send({ type: "start" });
 $("btn-rematch").onclick = () => sock.send({ type: "rematch" });
 $("btn-chat").onclick = sendChat;
@@ -107,6 +122,9 @@ $("btn-leave").onclick = () => {
   solo = false;
   snap = null;
   view?.reset();
+  overviewButton.textContent = "全图";
+  overviewButton.setAttribute("aria-pressed", "false");
+  overviewButton.title = "查看整张地图";
   seenVis = null;
   setSheet(false);
   $("connecting").classList.remove("show");
@@ -192,6 +210,7 @@ async function enter(intent: "create" | "join", playSolo = false) {
   if (!view) {
     view = new GameView($("map") as unknown as SVGSVGElement, $("fx") as HTMLCanvasElement);
     view.onSend = (from, to) => sock.send({ type: "send", from, to });
+    view.onNotice = toast;
   }
   requestAnimationFrame(() => view?.camera.fitCover());
   sock.connect(code);
@@ -209,7 +228,10 @@ async function enter(intent: "create" | "join", playSolo = false) {
     return;
   }
   if (currentAttempt !== attempt) return;
-  sock.send({ type: "hello", playerId, name, code, intent, mode, faction, home: homePick });
+  const tokenKey = `tdbd-room-token-${code}`;
+  const roomToken = intent === "join" ? localStorage.getItem(tokenKey) ?? crypto.randomUUID() : crypto.randomUUID();
+  localStorage.setItem(tokenKey, roomToken);
+  sock.send({ type: "hello", playerId, roomToken, name, code, intent, mode, faction, home: homePick });
 }
 
 async function enableMic() {
@@ -264,6 +286,11 @@ function onServer(msg: ServerToClient) {
 function paint(s: RoomSnapshot) {
   const was = snap?.phase;
   snap = s;
+  if (was !== s.phase && s.phase === "playing") {
+    overviewButton.textContent = "全图";
+    overviewButton.setAttribute("aria-pressed", "false");
+    overviewButton.title = "查看整张地图";
+  }
   entering = false;
   setEnterDisabled(false);
   view?.render(s);

@@ -291,6 +291,17 @@ canvas.fx { pointer-events: none; }
 .hud-stats #score { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
 .code { letter-spacing: 2px; color: var(--gold); }
 
+.map-overview {
+  position: absolute;
+  z-index: 3;
+  top: calc(58px + var(--safe-t));
+  left: 8px;
+  min-width: 48px;
+  min-height: 40px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
 .callout {
   left: 10px;
   bottom: calc(64px + var(--safe-b));

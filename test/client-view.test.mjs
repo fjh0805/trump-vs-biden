@@ -34,6 +34,31 @@ test("disconnect clears only local send predictions", () => {
   assert.deepEqual(view.pendingSends, []);
 });
 
+test("no troops and unexplored target give feedback without losing selection", () => {
+  const view = Object.create(GameView.prototype);
+  const notices = [];
+  Object.assign(view, {
+    snap: {
+      phase: "playing", you: "me", mode: "1v1", players: [{ id: "me", zone: "west" }],
+      states: { TX: { visible: true, ownerId: "me", troops: 0 }, OK: { visible: false } },
+    },
+    selected: "TX",
+    origins: new Set(["TX"]),
+    pendingSends: [],
+    onNotice: (message) => notices.push(message),
+  });
+  view.refreshPick = () => {};
+
+  view.dispatchSend("TX", "TX");
+  view.snap.states.OK.visible = true;
+  view.dispatchSend("TX", "OK");
+  assert.match(notices[0], /兵力/);
+  view.snap.states.OK.visible = false;
+  view.clickState("OK");
+  assert.match(notices[1], /尚未侦察/);
+  assert.equal(view.selected, "TX");
+});
+
 test("unchanged snapshots do not restyle states or interrupt their flash", () => {
   const classes = new Set(["flash"]);
   let mutations = 0;

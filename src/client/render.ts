@@ -78,6 +78,7 @@ export class GameView {
   private lastShake = 0;
   private framed = false;
   camera: MapCamera;
+  onNotice: (text: string) => void = () => {};
 
   constructor(svg: SVGSVGElement, fx: HTMLCanvasElement) {
     this.svg = svg;
@@ -243,6 +244,8 @@ export class GameView {
       for (const from of this.origins) {
         this.dispatchSend(from, target);
       }
+    } else if (target && this.dragMoved && !this.snap?.states[target]?.visible) {
+      this.onNotice("目标尚未侦察");
     } else if (!this.dragMoved && this.dragStartedSelected) {
       this.selected = null;
       this.origins.clear();
@@ -473,10 +476,15 @@ export class GameView {
     const info = this.snap?.states[from];
     if (!info || !this.isOwnControllable(from) || !this.snap?.states[to]?.visible || from === to) return;
     const actualTroops = this.shownTroops(from, info);
-    if (actualTroops <= 0) return;
+    if (actualTroops <= 0) {
+      this.onNotice("本州暂无可派兵力");
+      return;
+    }
     if (this.onSend(from, to)) {
       this.pendingSends.push({ from, to, n: actualTroops, acked: false });
       this.paintNumbers();
+    } else {
+      this.onNotice("连接已断开，请返回重连");
     }
   }
 
@@ -731,9 +739,21 @@ export class GameView {
       return;
     }
 
+    if (this.selected && !info?.visible) {
+      this.onNotice("目标尚未侦察");
+      return;
+    }
+
     this.selected = null;
     this.origins.clear();
     this.refreshPick();
+  }
+
+  focusHome() {
+    const snap = this.snap;
+    const home = MAP.states[snap?.players.find((p) => p.id === snap.you)?.home ?? ""];
+    this.camera.fitCover();
+    if (home) this.camera.centerOnSvg(home.cx, home.cy);
   }
 
   private tip(id?: string) {

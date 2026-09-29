@@ -161,8 +161,10 @@ export class GameRoom extends DurableObject<Env> {
       if (state.mode === "1v1" && named.length === 1) {
         named.push({ id: "ai-east", name: "电脑对手", home: "random" });
       }
+      const tokens = new Map(state.players.map((p) => [p.id, p.roomToken]));
       state.players = layoutPlayers(state.mode, state.humanFaction, named, state.hostId);
       for (const p of state.players) {
+        p.roomToken = tokens.get(p.id);
         const live = this.socketOf(p.id);
         p.connected = p.isAI || !!live;
       }
@@ -232,8 +234,12 @@ export class GameRoom extends DurableObject<Env> {
       if (state.mode === "1v1" && humans.length === 1) {
         humans.push({ id: "ai-east", name: "电脑对手", home: "random" });
       }
+      const tokens = new Map(state.players.map((p) => [p.id, p.roomToken]));
       state.players = layoutPlayers(state.mode, state.humanFaction, humans, state.hostId);
-      for (const p of state.players) p.connected = p.isAI || !!this.socketOf(p.id);
+      for (const p of state.players) {
+        p.roomToken = tokens.get(p.id);
+        p.connected = p.isAI || !!this.socketOf(p.id);
+      }
       seedMatch(state);
       await this.save(state);
       await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
@@ -253,7 +259,16 @@ export class GameRoom extends DurableObject<Env> {
     ws: WebSocket,
     msg: Extract<ClientToServer, { type: "hello" }>,
   ) {
-    const att = (ws.deserializeAttachment() as Attachment | null) ?? { playerId: "", code: msg.code };
+    const att = (ws.deserializeAttachment() as Attachment | null) ?? { playerId: "", code: "" };
+    if (att.playerId) {
+      ws.send(JSON.stringify({ type: "error", message: "已加入房间" }));
+      return;
+    }
+    if (msg.code !== att.code || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(msg.roomToken) ||
+      typeof msg.playerId !== "string" || !msg.playerId) {
+      ws.send(JSON.stringify({ type: "error", message: "房间身份无效，请重新加入" }));
+      return;
+    }
     let state = await this.load();
     const name = (msg.name || "玩家").trim().slice(0, 12);
     if (msg.intent === "create") {
@@ -285,6 +300,7 @@ export class GameRoom extends DurableObject<Env> {
         players: [
           {
             id: msg.playerId,
+            roomToken: msg.roomToken,
             name,
             faction,
             zone,
@@ -314,6 +330,10 @@ export class GameRoom extends DurableObject<Env> {
       }
       const existing = state.players.find((p) => p.id === msg.playerId);
       if (existing) {
+        if (!existing.roomToken || existing.roomToken !== msg.roomToken) {
+          ws.send(JSON.stringify({ type: "error", message: existing.roomToken ? "房间身份不匹配" : "旧房间无法安全重连，请重新建房" }));
+          return;
+        }
         existing.connected = true;
         existing.name = name;
         existing.disconnectedAt = 0;
@@ -342,6 +362,7 @@ export class GameRoom extends DurableObject<Env> {
         const home = resolveHome(faction, msg.home ?? "random", state.mode === "2v2" ? zone : undefined);
         state.players.push({
           id: msg.playerId,
+          roomToken: msg.roomToken,
           name,
           faction,
           zone,
@@ -356,11 +377,14 @@ export class GameRoom extends DurableObject<Env> {
         });
       }
     }
-    ws.serializeAttachment({ playerId: msg.playerId, code: (msg.code || att.code).toUpperCase() } satisfies Attachment);
+    ws.serializeAttachment({ playerId: msg.playerId, code: att.code } satisfies Attachment);
     for (const other of this.ctx.getWebSockets()) {
       if (other === ws) continue;
       const prev = other.deserializeAttachment() as Attachment | null;
-      if (prev?.playerId === msg.playerId) other.close(1000, "replaced");
+      if (prev?.playerId === msg.playerId) {
+        other.serializeAttachment({ playerId: "", code: att.code } satisfies Attachment);
+        other.close(1000, "replaced");
+      }
     }
     await this.save(state);
     this.broadcast();

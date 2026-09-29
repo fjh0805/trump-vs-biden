@@ -42,9 +42,11 @@ export class MapCamera {
       const w = viewport.clientWidth;
       const h = viewport.clientHeight;
       const wide = w > h;
-      if (this.landscape !== null && this.landscape !== wide) this.fitCover();
+      if (this.landscape !== null && this.landscape !== wide) {
+        if (this.scale <= 1.01) this.fitContain();
+        else this.fitCover();
+      }
       else {
-        this.minScale = this.coverScale();
         this.clamp();
         this.apply();
       }
@@ -62,8 +64,7 @@ export class MapCamera {
   }
 
   fitCover() {
-    this.minScale = this.coverScale();
-    this.scale = this.minScale;
+    this.scale = this.coverScale();
     this.center();
     this.clamp();
     this.apply();
@@ -76,8 +77,7 @@ export class MapCamera {
     const contain = Math.min(vw / 960, vh / 600);
     const ox = (vw - 960 * contain) / 2;
     const oy = (vh - 600 * contain) / 2;
-    this.minScale = this.coverScale();
-    if (this.scale < this.minScale) this.scale = this.minScale;
+    if (this.scale < this.coverScale()) this.scale = this.coverScale();
     this.x = vw / 2 - (ox + cx * contain) * this.scale;
     this.y = vh / 2 - (oy + cy * contain) * this.scale;
     this.clamp();
@@ -102,7 +102,6 @@ export class MapCamera {
   private clamp() {
     const vw = this.viewport.clientWidth;
     const vh = this.viewport.clientHeight;
-    this.minScale = this.coverScale();
     this.scale = Math.min(this.maxScale, Math.max(this.minScale, this.scale));
     const W = vw * this.scale;
     const H = vh * this.scale;

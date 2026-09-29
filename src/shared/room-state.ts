@@ -2,6 +2,7 @@ import type { Faction, Mode, Phase, Zone } from "./constants";
 
 export interface Player {
   id: string;
+  roomToken?: string;
   name: string;
   faction: Faction;
   zone: Zone;

@@ -1,7 +1,7 @@
 import type { Faction, Mode, Phase, Zone } from "./constants";
 
 export type ClientToServer =
-  | { type: "hello"; playerId: string; name: string; code: string; intent: "create" | "join"; mode?: Mode; faction?: Faction; home?: string }
+  | { type: "hello"; playerId: string; roomToken: string; name: string; code: string; intent: "create" | "join"; mode?: Mode; faction?: Faction; home?: string }
   | { type: "start" }
   | { type: "pickHome"; home: string }
   | { type: "send"; from: string; to: string }
