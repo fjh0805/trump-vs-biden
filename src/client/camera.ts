@@ -23,6 +23,7 @@ export class MapCamera {
   onSelectMove: (clientX: number, clientY: number) => void = () => {};
   onSelectEnd: (clientX: number, clientY: number) => void = () => {};
   onSelectCancel: () => void = () => {};
+  canDoubleTapZoom: () => boolean = () => true;
 
   constructor(
     private viewport: HTMLElement,
@@ -216,13 +217,13 @@ export class MapCamera {
     if (this.pointers.size > 0) return;
     if (this.moved || this.multitouch || e.type === "pointercancel") return;
     const now = performance.now();
-    if (now - this.lastTap < DBL_MS) {
+    if (now - this.lastTap < DBL_MS && this.canDoubleTapZoom()) {
       this.lastTap = 0;
       if (this.scale > this.coverScale() * 1.08) this.fitCover();
       else this.zoomAt(p.x, p.y, Math.min(this.maxScale, this.scale * 1.85));
       return;
     }
-    this.lastTap = now;
+    this.lastTap = this.canDoubleTapZoom() ? now : 0;
     this.onTap(e.clientX, e.clientY);
   };
 

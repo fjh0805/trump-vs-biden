@@ -59,6 +59,63 @@ test("no troops and unexplored target give feedback without losing selection", (
   assert.equal(view.selected, "TX");
 });
 
+test("drag ending on another owned state collects it without dispatching troops", () => {
+  const view = Object.create(GameView.prototype);
+  const sends = [];
+  Object.assign(view, {
+    dragging: true,
+    dragMoved: true,
+    dragStart: { x: 0, y: 0 },
+    lastDragPoint: { x: 50, y: 0 },
+    dragCandidate: "OK",
+    snap: {
+      phase: "playing", you: "me", mode: "1v1", players: [{ id: "me", zone: "west" }],
+      states: { TX: { visible: true, ownerId: "me" }, OK: { visible: true, ownerId: "me" } },
+    },
+    selected: "TX",
+    origins: new Set(["TX"]),
+    hitState: () => "OK",
+    clientToSvg: () => ({ x: 50, y: 0 }),
+    refreshPick: () => {},
+    dispatchSend: (...args) => sends.push(args),
+  });
+
+  view.selectEnd(50, 0);
+  assert.deepEqual([...view.origins], ["TX", "OK"]);
+  assert.deepEqual(sends, []);
+});
+
+test("drag through owned states sends only the visited origins to the target", () => {
+  const view = Object.create(GameView.prototype);
+  const sends = [];
+  Object.assign(view, {
+    dragging: true,
+    dragMoved: false,
+    dragStart: { x: 0, y: 0 },
+    lastDragPoint: { x: 0, y: 0 },
+    dragCandidate: "TX",
+    snap: {
+      phase: "playing", you: "me", mode: "1v1", players: [{ id: "me", zone: "west" }],
+      states: {
+        TX: { visible: true, ownerId: "me" },
+        OK: { visible: true, ownerId: "me" },
+        CA: { visible: true, ownerId: "me" },
+        AR: { visible: true, ownerId: null },
+      },
+    },
+    selected: "TX",
+    origins: new Set(["TX"]),
+    hitState: (x) => x < 20 ? "TX" : x < 45 ? "OK" : "AR",
+    clientToSvg: (x, y) => ({ x, y }),
+    refreshPick: () => {},
+    dispatchSend: (...args) => sends.push(args),
+  });
+
+  view.selectEnd(60, 0);
+  assert.deepEqual(sends, [["TX", "AR"], ["OK", "AR"]]);
+  assert.ok(!view.origins.has("CA"));
+});
+
 test("unchanged snapshots do not restyle states or interrupt their flash", () => {
   const classes = new Set(["flash"]);
   let mutations = 0;

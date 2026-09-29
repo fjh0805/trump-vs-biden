@@ -31,3 +31,30 @@ test("portrait map can show all states and refocus after an overview", () => {
   assert.ok(camera.scale >= camera.coverScale());
   assert.match(camera.world.style.transform, /scale\(/);
 });
+
+test("rapid target tap remains a game action while an origin is selected", () => {
+  const listeners = new Map();
+  globalThis.ResizeObserver = class { observe() {} };
+  const viewport = {
+    clientWidth: 960,
+    clientHeight: 600,
+    style: {},
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    addEventListener: (name, handler) => listeners.set(name, handler),
+  };
+  const camera = new MapCamera(viewport, { style: {} });
+  const taps = [];
+  camera.pointers = new Map([[1, { x: 100, y: 100 }]]);
+  camera.pointerStart = new Map([[1, { x: 100, y: 100 }]]);
+  camera.lastTap = performance.now() - 100;
+  camera.moved = false;
+  camera.multitouch = false;
+  camera.selecting = false;
+  camera.canDoubleTapZoom = () => false;
+  camera.onTap = (x, y) => taps.push([x, y]);
+  camera.zoomAt = () => assert.fail("target tap must not zoom");
+
+  listeners.get("pointerup")({ pointerId: 1, clientX: 100, clientY: 100, type: "pointerup" });
+  assert.deepEqual(taps, [[100, 100]]);
+  assert.equal(camera.lastTap, 0);
+});

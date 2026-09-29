@@ -141,6 +141,7 @@ export class GameView {
     this.camera.onSelectStart = (x, y) => this.selectStart(x, y);
     this.camera.onSelectMove = (x, y) => this.selectMove(x, y);
     this.camera.onSelectEnd = (x, y) => this.selectEnd(x, y);
+    this.camera.canDoubleTapZoom = () => !this.selected;
     this.camera.onSelectCancel = () => {
       this.dragging = false;
       this.dragTarget = null;
@@ -239,8 +240,10 @@ export class GameView {
     if (!this.dragging) return;
     if (Math.hypot(cx - this.dragStart.x, cy - this.dragStart.y) >= 12) this.selectMove(cx, cy);
     this.dragging = false;
-    const target = this.dragMoved ? this.hitState(cx, cy) : null;
-    if (target && this.snap?.states[target]?.visible && !this.origins.has(target) && this.origins.size) {
+    const target = this.dragMoved ? this.hitState(cx, cy, false) : null;
+    if (target && this.isOwnControllable(target)) {
+      this.origins.add(target);
+    } else if (target && this.snap?.states[target]?.visible && !this.origins.has(target) && this.origins.size) {
       for (const from of this.origins) {
         this.dispatchSend(from, target);
       }
