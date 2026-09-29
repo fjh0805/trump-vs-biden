@@ -359,33 +359,26 @@ export class GameView {
       const path = this.svg.getElementById(`st-${s.id}`) as SVGPathElement | null;
       if (!path) continue;
       const info = snap.states[s.id];
-      path.classList.remove("fog", "empty", "trump", "biden", "mine", "pick", "target", "flash");
-      if (!info?.visible) {
-        path.classList.add("fog");
+      const visible = !!info?.visible;
+      path.classList.toggle("fog", !visible);
+      if (!visible) {
+        for (const name of ["empty", "trump", "biden", "mine", "pick", "target"]) {
+          path.classList.toggle(name, false);
+        }
         this.troopDisplays.delete(s.id);
         this.hideLabel(s.id);
         continue;
       }
       const faction = info.faction;
-      if (!faction) path.classList.add("empty");
-      else path.classList.add(faction);
-      const mineFaction = me?.faction;
-      if (faction && mineFaction && faction === mineFaction) {
-        if (snap.mode !== "2v2" || controlBank(s.id) === me.zone) path.classList.add("mine");
-      } else if (info.ownerId === snap.you) {
-        if (snap.mode !== "2v2" || !me || controlBank(s.id) === me.zone) path.classList.add("mine");
-      }
-      if (this.origins.has(s.id) || this.selected === s.id) path.classList.add("pick");
-      if (
-        (this.selected || this.origins.size) &&
-        info.visible &&
-        s.id !== this.selected &&
-        !this.origins.has(s.id)
-      ) {
-        path.classList.add("target");
-      }
-      if (this.dragTarget === s.id) path.classList.add("target");
+      path.classList.toggle("empty", !faction);
+      path.classList.toggle("trump", faction === "trump");
+      path.classList.toggle("biden", faction === "biden");
+      const inBank = snap.mode !== "2v2" || !me || controlBank(s.id) === me.zone;
+      path.classList.toggle("mine", inBank && (info.ownerId === snap.you || !!(faction && faction === me?.faction)));
       const isOrigin = this.origins.has(s.id) || this.selected === s.id;
+      path.classList.toggle("pick", isOrigin);
+      path.classList.toggle("target", !isOrigin && !!(this.selected || this.origins.size) &&
+        (!this.dragging || this.dragTarget === s.id));
       const shown = this.updateTroopDisplay(s.id, info, snap);
       this.upsertLabel(
         s.id,
@@ -431,9 +424,9 @@ export class GameView {
       row = { g, zh: z, n: num };
       this.labels.set(id, row);
     }
-    row.g.style.display = "";
-    row.zh.textContent = zh;
-    row.n.textContent = n;
+    if (row.g.style.display) row.g.style.display = "";
+    if (row.zh.textContent !== zh) row.zh.textContent = zh;
+    if (row.n.textContent !== n) row.n.textContent = n;
   }
 
   private hideLabel(id: string) {
@@ -442,7 +435,15 @@ export class GameView {
   }
 
   revertLastSend() {
-    this.pendingSends.shift();
+    const index = this.pendingSends.findIndex((send) => !send.acked);
+    if (index < 0) return;
+    this.pendingSends.splice(index, 1);
+    this.paintNumbers();
+  }
+
+  clearPendingSends() {
+    if (!this.pendingSends.length) return;
+    this.pendingSends = [];
     this.paintNumbers();
   }
 
@@ -780,7 +781,11 @@ export class GameView {
       }
       if (e.kind === "capture") {
         sfxCapture(e.faction);
-        this.svg.getElementById(`st-${e.state}`)?.classList.add("flash");
+        const path = this.svg.getElementById(`st-${e.state}`);
+        if (path) {
+          path.classList.add("flash");
+          window.setTimeout(() => path.classList.remove("flash"), 200);
+        }
       }
     }
     if (clash) sfxClash();

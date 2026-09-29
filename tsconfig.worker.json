@@ -10,7 +10,7 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
-    "types": ["./worker-configuration.d.ts"]
+    "types": ["@cloudflare/workers-types", "./worker-configuration.d.ts"]
   },
   "include": ["worker", "src/shared", "src/json.d.ts", "worker-configuration.d.ts"]
 }

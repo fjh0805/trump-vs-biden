@@ -27,6 +27,9 @@ let seenVis: Set<string> | null = null;
 let entering = false;
 let attempt = 0;
 let peerIds: string[] = [];
+let paintedPlayers = "";
+let paintedChat = "";
+let paintedLobbyHomes = "";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -111,6 +114,12 @@ $("btn-leave").onclick = () => {
   hideTutorial();
   const feed = document.getElementById("radio-feed");
   if (feed) feed.replaceChildren();
+  paintedPlayers = "";
+  paintedChat = "";
+  paintedLobbyHomes = "";
+  $("players").replaceChildren();
+  $("log").replaceChildren();
+  $("lobby-homes").replaceChildren();
   $("play").classList.remove("show");
   $("title").classList.add("show");
 };
@@ -136,6 +145,7 @@ sock.onClose = () => {
   entering = false;
   setEnterDisabled(false);
   $("connecting").classList.remove("show");
+  view?.clearPendingSends();
   if (snap) toast("连接断开，请返回并用房间码重新加入");
 };
 
@@ -260,23 +270,31 @@ function paint(s: RoomSnapshot) {
   $("room-code").textContent = s.code;
   $("score").textContent = compactScore(s);
   $("clock").textContent = fmt(s.timeLeftMs);
-  $("players").innerHTML = s.players
-    .map((p) => {
-      const you = p.id === s.you ? "（你）" : "";
-      const zone = p.zone === "west" ? "西岸" : "东岸";
-      const home = HOME_ZH[p.home as HomeId] ?? p.home;
-      const bot = p.isAI ? (p.aiHold ? " · 电脑暂管" : " · 电脑") : "";
-      const drop = !p.connected && !p.isAI ? " · 掉线" : "";
-      return `<div class="player ${p.speaking ? "talk" : ""}">
+  const playerKey = JSON.stringify([s.you, s.players]);
+  if (playerKey !== paintedPlayers) {
+    $("players").innerHTML = s.players
+      .map((p) => {
+        const you = p.id === s.you ? "（你）" : "";
+        const zone = p.zone === "west" ? "西岸" : "东岸";
+        const home = HOME_ZH[p.home as HomeId] ?? p.home;
+        const bot = p.isAI ? (p.aiHold ? " · 电脑暂管" : " · 电脑") : "";
+        const drop = !p.connected && !p.isAI ? " · 掉线" : "";
+        return `<div class="player ${p.speaking ? "talk" : ""}">
         <div class="hero-wrap ${p.speaking ? "talk" : ""}">${headFor(p.faction, 44)}</div>
         <div class="meta"><b>${escapeHtml(p.name)}${you}</b><span>${p.faction === "trump" ? "特朗普" : "拜登"} · ${zone} · ${home}${bot}${drop}${p.muted ? " · 静音" : ""}</span></div>
       </div>`;
-    })
-    .join("");
-  $("log").innerHTML = s.chat
-    .slice(-6)
-    .map((c) => `<div><b>${escapeHtml(c.name)}</b> ${escapeHtml(c.text)}</div>`)
-    .join("");
+      })
+      .join("");
+    paintedPlayers = playerKey;
+  }
+  const recentChat = s.chat.slice(-6);
+  const chatKey = JSON.stringify(recentChat);
+  if (chatKey !== paintedChat) {
+    $("log").innerHTML = recentChat
+      .map((c) => `<div><b>${escapeHtml(c.name)}</b> ${escapeHtml(c.text)}</div>`)
+      .join("");
+    paintedChat = chatKey;
+  }
   $("connecting").classList.remove("show");
   const waitPeer = s.phase === "playing" && s.players.some((p) => p.id !== s.you && !p.isAI && !p.connected);
   $("banner").hidden = !waitPeer;
@@ -391,11 +409,14 @@ function paintLobbyHomes(s: RoomSnapshot) {
   const box = $("lobby-homes");
   if (!box) return;
   if (s.phase !== "lobby") {
-    box.replaceChildren();
+    if (paintedLobbyHomes) box.replaceChildren();
+    paintedLobbyHomes = "";
     return;
   }
   const me = s.players.find((p) => p.id === s.you);
   if (!me) return;
+  const key = JSON.stringify([s.mode, me.faction, me.zone, me.home]);
+  if (key === paintedLobbyHomes) return;
   const list = s.mode === "2v2" ? homesInBank(me.faction, me.zone) : HOMES[me.faction];
   const opts: { id: string; label: string }[] = [
     ...list.map((id) => ({ id, label: HOME_ZH[id] })),
@@ -411,6 +432,7 @@ function paintLobbyHomes(s: RoomSnapshot) {
       sock.send({ type: "pickHome", home });
     });
   });
+  paintedLobbyHomes = key;
 }
 
 function sendChat() {

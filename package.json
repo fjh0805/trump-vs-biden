@@ -10,12 +10,15 @@
     "deploy": "npm run build && wrangler deploy",
     "types": "wrangler types",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "test": "node --test test/*.test.mjs",
     "bake-map": "node scripts/bake-map.mjs",
     "start": "wrangler dev --port 43123 --ip 0.0.0.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.54.10",
+    "@cloudflare/workers-types": "^5.20260929.1",
     "@types/d3-geo": "^3.1.1",
+    "esbuild": "^0.25.12",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "wrangler": "^4.20.0"
