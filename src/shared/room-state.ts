@@ -7,6 +7,7 @@ export interface Player {
   faction: Faction;
   zone: Zone;
   home: string;
+  homeChoice?: string;
   isAI: boolean;
   isHost: boolean;
   connected: boolean;
@@ -62,4 +63,5 @@ export interface RoomState {
   chat: ChatLine[];
   winner: Faction | "draw" | null;
   reason: string | null;
+  continued?: boolean;
 }

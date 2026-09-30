@@ -9,7 +9,6 @@ import {
   TICK_MS,
   controlBank,
   homesInBank,
-  resolveHome,
   armyTravelSeconds,
 } from "../src/shared/constants";
 import { neutralTroops } from "../src/shared/map-area";
@@ -48,6 +47,7 @@ export function seedMatch(state: RoomState) {
   state.tick = 0;
   state.winner = null;
   state.reason = null;
+  state.continued = false;
   state.startedAt = Date.now();
   state.endedAt = 0;
   state.phase = "playing";
@@ -74,8 +74,10 @@ export function layoutPlayers(
   if (mode === "1v1") {
     const a = humans[0];
     const b = humans[1] ?? { id: "ai-east", name: "电脑对手" };
-    const homeA = resolveHome(humanFaction, a.home ?? "random");
-    const homeB = resolveHome(opposite, b.home ?? "random");
+    const [homeA, homeB] = chooseHomes([
+      { faction: humanFaction, pick: a.home, zone: undefined },
+      { faction: opposite, pick: b.home, zone: undefined },
+    ]);
     return [
       player(a.id, a.name, humanFaction, controlBank(homeA), homeA, a.id.startsWith("ai-"), a.id === hostId),
       player(b.id, b.name, opposite, controlBank(homeB), homeB, b.id.startsWith("ai-"), b.id === hostId),
@@ -83,10 +85,12 @@ export function layoutPlayers(
   }
   const west = humans[0];
   const east = humans[1];
-  const homeW = resolveHome(humanFaction, west.home ?? "random", "west");
-  const homeE = resolveHome(humanFaction, east.home ?? "random", "east");
-  const aiW = pickFree(opposite, "west", [homeW, homeE]);
-  const aiE = pickFree(opposite, "east", [homeW, homeE, aiW]);
+  const [homeW, homeE, aiW, aiE] = chooseHomes([
+    { faction: humanFaction, pick: west.home, zone: "west" },
+    { faction: humanFaction, pick: east.home, zone: "east" },
+    { faction: opposite, zone: "west" },
+    { faction: opposite, zone: "east" },
+  ]);
   return [
     player(west.id, west.name, humanFaction, "west", homeW, false, west.id === hostId),
     player(east.id, east.name, humanFaction, "east", homeE, false, east.id === hostId),
@@ -95,11 +99,30 @@ export function layoutPlayers(
   ];
 }
 
-function pickFree(faction: Faction, zone: Zone, taken: string[]): HomeId {
-  const opts = homesInBank(faction, zone).filter((h) => !taken.includes(h));
-  const pool = opts.length ? opts : homesInBank(faction, zone);
-  const list = pool.length ? pool : HOMES[faction];
-  return list[Math.floor(Math.random() * list.length)];
+function chooseHomes(positions: { faction: Faction; pick?: string; zone?: Zone }[]): HomeId[] {
+  const options = positions.map(({ faction, pick, zone }) => {
+    const available = zone ? homesInBank(faction, zone) : HOMES[faction];
+    return pick && available.includes(pick as HomeId) ? [pick as HomeId] : available;
+  });
+  const choices: { homes: HomeId[]; separation: number }[] = [];
+  const search = (homes: HomeId[]) => {
+    if (homes.length === options.length) {
+      const distances = homes.flatMap((home, i) => homes.slice(i + 1).flatMap((other, offset) => {
+        const j = i + offset + 1;
+        if (positions[i].faction === positions[j].faction) return [];
+        return [Math.hypot(MAP.states[home].cx - MAP.states[other].cx, MAP.states[home].cy - MAP.states[other].cy)];
+      }));
+      choices.push({ homes, separation: Math.min(...distances) });
+      return;
+    }
+    for (const home of options[homes.length]) {
+      if (!homes.includes(home)) search([...homes, home]);
+    }
+  };
+  search([]);
+  const best = Math.max(...choices.map((choice) => choice.separation));
+  const good = choices.filter((choice) => choice.separation >= best * 0.8);
+  return good[Math.floor(Math.random() * good.length)].homes;
 }
 
 function player(id: string, name: string, faction: Faction, zone: Zone, home: string, isAI: boolean, isHost: boolean) {
@@ -136,6 +159,7 @@ export function canSendTo(state: RoomState, playerId: string, from: string, to: 
 
 export function sendArmy(state: RoomState, playerId: string, from: string, to: string, ratio: number): string | null {
   if (state.phase !== "playing") return "对局尚未开始";
+  if (state.continued && factionOf(state, playerId) !== state.winner) return "对局已结束";
   const terr = state.territories[from];
   if (!terr || terr.ownerId !== playerId) return "只能从自己的州出兵";
   const actor = state.players.find((p) => p.id === playerId);
@@ -173,6 +197,7 @@ export function step(state: RoomState): GameEvent[] {
   state.tick += 1;
   const homes = new Set(state.players.map((p) => p.home));
   for (const [id, terr] of Object.entries(state.territories)) {
+    if (state.continued && terr.ownerId && factionOf(state, terr.ownerId) !== state.winner) continue;
     if (!terr.ownerId) {
       const gain = neutralTroopsPerSecond() * (TICK_MS / 1000);
       if (terr.troops < BALANCE.NEUTRAL_TROOP_CAP) {
@@ -206,6 +231,8 @@ export function step(state: RoomState): GameEvent[] {
   resolveSieges(state, events);
 
   runAI(state, events);
+
+  if (state.continued) return events;
 
   const scores = countScores(state);
   const elapsed = Date.now() - state.startedAt;
@@ -399,6 +426,7 @@ function runAI(state: RoomState, events: GameEvent[]) {
   const period = Math.max(6, Math.round((BALANCE.AI_THINK_SEC * 1000) / TICK_MS));
   for (const p of state.players) {
     if (!p.isAI || state.phase !== "playing") continue;
+    if (state.continued && p.faction !== state.winner) continue;
     const stagger = p.zone === "east" ? 3 : 0;
     if ((state.tick + stagger) % period !== 0) continue;
     const ctx = aiContext(state, p.id);

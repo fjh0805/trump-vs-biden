@@ -10,7 +10,7 @@ const { outputFiles } = await build({
   platform: "node",
   write: false,
 });
-const { aiContext, canSendTo, emptyTerritories, seedMatch, step } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].contents).toString("base64")}`);
+const { aiContext, canSendTo, emptyTerritories, layoutPlayers, seedMatch, sendArmy, step } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].contents).toString("base64")}`);
 const { outputFiles: policyFiles } = await build({
   entryPoints: ["src/shared/ai-policy.ts"], bundle: true, format: "esm", platform: "node", write: false,
 });
@@ -33,6 +33,76 @@ function match() {
 function army(id, ownerId, faction, from, to, troops) {
   return { id, ownerId, faction, from, to, troops, progress: 1, speed: 0, x: 0, y: 0, arrived: true };
 }
+
+const map = JSON.parse(readFileSync("src/shared/us-map.json", "utf8"));
+function distance(a, b) {
+  return Math.hypot(map.states[a].cx - map.states[b].cx, map.states[a].cy - map.states[b].cy);
+}
+
+test("random 1v1 homes stay well separated, including two human players", () => {
+  for (const opponents of [undefined, [{ id: "red", name: "Red", home: "random" }, { id: "blue", name: "Blue", home: "random" }]]) {
+    for (let i = 0; i < 50; i++) {
+      const players = layoutPlayers("1v1", "trump", opponents ?? [{ id: "red", name: "Red", home: "random" }], "red");
+      assert.ok(distance(players[0].home, players[1].home) >= 500, `${players[0].home} vs ${players[1].home}`);
+    }
+  }
+});
+
+test("fixed homes remain fixed and random opponents spawn as far away as possible", () => {
+  const players = layoutPlayers("1v1", "trump", [
+    { id: "red", name: "Red", home: "OH" }, { id: "blue", name: "Blue", home: "random" },
+  ], "red");
+  assert.equal(players[0].home, "OH");
+  assert.equal(players[1].home, "CA");
+  const fixed = layoutPlayers("1v1", "trump", [
+    { id: "red", name: "Red", home: "OH" }, { id: "blue", name: "Blue", home: "PA" },
+  ], "red");
+  assert.deepEqual(fixed.map((p) => p.home), ["OH", "PA"]);
+});
+
+test("2v2 random placement separates both human and AI opponents across banks", () => {
+  for (const faction of ["trump", "biden"]) {
+    for (let i = 0; i < 50; i++) {
+      const players = layoutPlayers("2v2", faction, [
+        { id: "west", name: "West", home: "random" },
+        { id: "east", name: "East", home: "random" },
+      ], "west");
+      const enemy = players.filter((p) => p.faction !== faction);
+      const team = players.filter((p) => p.faction === faction);
+      for (const human of team) for (const bot of enemy) {
+        assert.ok(distance(human.home, bot.home) >= 280, `${faction}: ${human.home} vs ${bot.home}`);
+      }
+      assert.equal(new Set(players.map((p) => p.home)).size, 4);
+    }
+  }
+});
+
+test("free conquest never re-triggers victory and defeated factions cannot send", () => {
+  const state = match();
+  state.territories.OK.troops = 0.95;
+  state.armies.push(army("a1", "red", "trump", "TX", "OK", 2));
+  step(state);
+  assert.equal(state.phase, "ended");
+  state.continued = true;
+  state.phase = "playing";
+  const oldWinner = state.winner;
+  for (let i = 0; i < 50; i++) step(state);
+  assert.equal(state.phase, "playing");
+  assert.equal(state.winner, oldWinner);
+  assert.equal(sendArmy(state, "blue", "OK", "TX", 1), "对局已结束");
+  assert.equal(sendArmy(state, "red", "TX", "OK", 1), null);
+});
+
+test("free conquest leaves defeated garrisons static while the winner can still grow", () => {
+  const state = match();
+  state.continued = true;
+  state.winner = "trump";
+  const blue = state.territories.OK.troops;
+  const red = state.territories.TX.troops;
+  step(state);
+  assert.equal(state.territories.OK.troops, blue);
+  assert.ok(state.territories.TX.troops > red);
+});
 
 test("a mutual siege wipeout leaves the defender in control", () => {
   const state = match();

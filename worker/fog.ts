@@ -49,12 +49,13 @@ export function snapshotFor(state: RoomState, playerId: string, events: RoomSnap
   const elapsed = state.phase === "playing" ? Date.now() - state.startedAt : 0;
   const matchMs = BALANCE.MATCH_TIME_SEC * 1000;
   const timeLeftMs =
-    state.phase === "playing" ? Math.max(0, matchMs - elapsed) : state.phase === "ended" ? 0 : matchMs;
+    state.continued ? 0 : state.phase === "playing" ? Math.max(0, matchMs - elapsed) : state.phase === "ended" ? 0 : matchMs;
+  const defeated = state.continued && state.winner !== factionOf(state, playerId);
   return {
     type: "snapshot",
     code: state.code,
     mode: state.mode,
-    phase: state.phase,
+    phase: defeated ? "ended" : state.phase,
     you: playerId,
     hostId: state.hostId,
     humanFaction: state.humanFaction,
@@ -66,6 +67,7 @@ export function snapshotFor(state: RoomState, playerId: string, events: RoomSnap
       faction: p.faction,
       zone: p.zone,
       home: p.home,
+      homeChoice: p.homeChoice,
       isAI: p.isAI,
       isHost: p.isHost,
       connected: p.connected,
@@ -83,5 +85,6 @@ export function snapshotFor(state: RoomState, playerId: string, events: RoomSnap
     bidenTroops: Math.floor(scores.bidenTroops),
     winner: state.winner,
     reason: state.reason,
+    continued: !!state.continued,
   };
 }

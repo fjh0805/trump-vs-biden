@@ -154,6 +154,7 @@ button.big:active { transform: translateY(1px); }
 .map-viewport {
   position: absolute;
   inset: 0;
+  z-index: 0;
   overflow: hidden;
   touch-action: none;
 }
@@ -498,6 +499,11 @@ canvas.fx { pointer-events: none; }
   pointer-events: auto;
 }
 .overlay.show { display: grid; }
+#result > div { display: grid; gap: 8px; justify-items: center; }
+#result .start, #result .icon-btn { width: min(280px, 100%); }
+#result [hidden] { display: none; }
+#result { z-index: 7; }
+#result.show { display: grid; }
 .banner {
   left: 50%;
   top: calc(52px + var(--safe-t));

@@ -71,6 +71,8 @@ overviewButton.onclick = () => {
 };
 $("btn-start").onclick = () => sock.send({ type: "start" });
 $("btn-rematch").onclick = () => sock.send({ type: "rematch" });
+$("btn-continue").onclick = () => sock.send({ type: "continue" });
+$("btn-result-leave").onclick = () => $("btn-leave").click();
 $("btn-chat").onclick = sendChat;
 $("chat").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendChat();
@@ -128,6 +130,7 @@ $("btn-leave").onclick = () => {
   seenVis = null;
   setSheet(false);
   $("connecting").classList.remove("show");
+  $("result").classList.remove("show");
   $("banner").classList.remove("show");
   hideTutorial();
   const feed = document.getElementById("radio-feed");
@@ -285,7 +288,11 @@ function onServer(msg: ServerToClient) {
 
 function paint(s: RoomSnapshot) {
   const was = snap?.phase;
+  const wasContinued = snap?.continued;
   snap = s;
+  if (s.continued && !wasContinued && s.winner !== s.players.find((p) => p.id === s.you)?.faction) {
+    voice.stop();
+  }
   if (was !== s.phase && s.phase === "playing") {
     overviewButton.textContent = "全图";
     overviewButton.setAttribute("aria-pressed", "false");
@@ -296,14 +303,14 @@ function paint(s: RoomSnapshot) {
   view?.render(s);
   $("room-code").textContent = s.code;
   $("score").textContent = compactScore(s);
-  $("clock").textContent = fmt(s.timeLeftMs);
+  $("clock").textContent = s.continued ? "自由模式" : fmt(s.timeLeftMs);
   const playerKey = JSON.stringify([s.you, s.players]);
   if (playerKey !== paintedPlayers) {
     $("players").innerHTML = s.players
       .map((p) => {
         const you = p.id === s.you ? "（你）" : "";
         const zone = p.zone === "west" ? "西岸" : "东岸";
-        const home = HOME_ZH[p.home as HomeId] ?? p.home;
+        const home = s.phase === "lobby" && p.homeChoice === "random" ? "随机" : HOME_ZH[p.home as HomeId] ?? p.home;
         const bot = p.isAI ? (p.aiHold ? " · 电脑暂管" : " · 电脑") : "";
         const drop = !p.connected && !p.isAI ? " · 掉线" : "";
         return `<div class="player ${p.speaking ? "talk" : ""}">
@@ -323,7 +330,7 @@ function paint(s: RoomSnapshot) {
     paintedChat = chatKey;
   }
   $("connecting").classList.remove("show");
-  const waitPeer = s.phase === "playing" && s.players.some((p) => p.id !== s.you && !p.isAI && !p.connected);
+  const waitPeer = s.phase === "playing" && !s.continued && s.players.some((p) => p.id !== s.you && !p.isAI && !p.connected);
   $("banner").hidden = !waitPeer;
   $("banner").classList.toggle("show", waitPeer);
   $("banner").textContent = COPY.peerWait;
@@ -336,20 +343,22 @@ function paint(s: RoomSnapshot) {
   $("btn-start").textContent = COPY.start;
   paintLobbyHomes(s);
   if (was !== s.phase) setSheet(s.phase === "lobby");
-  if (s.phase === "playing") maybeShowTutorial();
+  if (s.phase === "playing" && !s.continued) maybeShowTutorial();
   else hideTutorial();
   const me = s.players.find((p) => p.id === s.you);
   narrate(s, me?.faction ?? "trump", was);
   const ov = $("result");
   if (s.phase === "ended") {
     ov.classList.add("show");
-    $<HTMLButtonElement>("btn-rematch").hidden = !host;
-    $("result-wait").hidden = host;
-    const title =
-      s.winner === "draw" ? "平局" : s.winner === "trump" ? "特朗普阵营获胜" : "拜登阵营获胜";
+    const won = s.winner === me?.faction;
+    $<HTMLButtonElement>("btn-continue").hidden = !won || s.continued;
+    $<HTMLButtonElement>("btn-rematch").hidden = !host || (!won && s.winner !== "draw") || s.continued;
+    $("result-wait").hidden = won || s.winner === "draw";
+    $("result-wait").textContent = "本局已结束";
+    const title = s.winner === "draw" ? "平局" : won ? "胜利" : "战败";
     $("result-title").textContent = title;
     $("result-reason").textContent = s.reason ?? RULES_ZH.join(" ");
-    if (was !== "ended") sfxWin();
+    if (was !== "ended" && won) sfxWin();
   } else ov.classList.remove("show");
 }
 
@@ -442,7 +451,8 @@ function paintLobbyHomes(s: RoomSnapshot) {
   }
   const me = s.players.find((p) => p.id === s.you);
   if (!me) return;
-  const key = JSON.stringify([s.mode, me.faction, me.zone, me.home]);
+  const choice = me.homeChoice ?? me.home;
+  const key = JSON.stringify([s.mode, me.faction, me.zone, choice]);
   if (key === paintedLobbyHomes) return;
   const list = s.mode === "2v2" ? homesInBank(me.faction, me.zone) : HOMES[me.faction];
   const opts: { id: string; label: string }[] = [
@@ -450,7 +460,7 @@ function paintLobbyHomes(s: RoomSnapshot) {
     { id: "random", label: "随机" },
   ];
   box.innerHTML = opts
-    .map((o) => `<button data-home="${o.id}" class="${o.id === me.home ? "on" : ""}">${o.label}</button>`)
+    .map((o) => `<button data-home="${o.id}" class="${o.id === choice ? "on" : ""}">${o.label}</button>`)
     .join("");
   box.querySelectorAll("button").forEach((b) => {
     b.addEventListener("click", () => {

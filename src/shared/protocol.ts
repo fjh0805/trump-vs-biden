@@ -9,6 +9,7 @@ export type ClientToServer =
   | { type: "mute"; muted: boolean }
   | { type: "speaking"; speaking: boolean }
   | { type: "rematch" }
+  | { type: "continue" }
   | { type: "signal"; to: string; payload: SignalPayload };
 
 export type SignalPayload =
@@ -28,6 +29,7 @@ export interface PlayerView {
   faction: Faction;
   zone: Zone;
   home: string;
+  homeChoice?: string;
   isAI: boolean;
   isHost: boolean;
   connected: boolean;
@@ -77,6 +79,7 @@ export interface RoomSnapshot {
   bidenTroops: number;
   winner: Faction | "draw" | null;
   reason: string | null;
+  continued: boolean;
 }
 
 export type ServerToClient =

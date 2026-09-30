@@ -146,3 +146,60 @@ test("the final capture broadcasts an ended snapshot to the defeated player", as
   assert.equal(last.winner, "trump");
   assert.match(last.reason, /领土与部队全部失去/);
 });
+
+test("winner can keep conquering while the loser stays ended and cannot restart", async () => {
+  const sockets = [socket("ACDE"), socket("ACDE")];
+  const game = room(sockets);
+  await game.onHello(sockets[0], {
+    type: "hello", playerId: "host", roomToken: crypto.randomUUID(), name: "host",
+    code: "ACDE", intent: "create", home: "random",
+  });
+  await game.onHello(sockets[1], {
+    type: "hello", playerId: "guest", roomToken: crypto.randomUUID(), name: "guest",
+    code: "ACDE", intent: "join", home: "random",
+  });
+  assert.equal(game.memory.players[0].homeChoice, "random");
+  assert.equal(game.memory.players[1].homeChoice, "random");
+  assert.equal(sockets[0].messages.at(-2).players[0].homeChoice, "random");
+  await game.webSocketMessage(sockets[0], JSON.stringify({ type: "start" }));
+  assert.equal(game.memory.players[0].homeChoice, "random");
+  assert.equal(game.memory.players[1].homeChoice, "random");
+  game.memory.phase = "ended";
+  game.memory.winner = "biden";
+  game.memory.reason = "胜负已定";
+  game.memory.armies.push({ id: "loser-army", ownerId: "host", faction: "trump", from: "TX", to: "CA", troops: 5, progress: 0, speed: 0.01, x: 0, y: 0, arrived: false });
+
+  await game.webSocketMessage(sockets[0], JSON.stringify({ type: "rematch" }));
+  assert.equal(game.memory.phase, "ended");
+  await game.webSocketMessage(sockets[0], JSON.stringify({ type: "continue" }));
+  assert.equal(game.memory.phase, "ended");
+  await game.webSocketMessage(sockets[1], JSON.stringify({ type: "continue" }));
+  assert.equal(game.memory.phase, "playing");
+  assert.equal(game.memory.continued, true);
+  assert.equal(game.memory.armies.length, 0);
+  assert.equal(sockets[0].messages.at(-2).phase, "ended");
+  assert.equal(sockets[1].messages.at(-2).phase, "playing");
+  assert.deepEqual(sockets[0].messages.at(-1), { type: "peers", ids: [] });
+  assert.deepEqual(sockets[1].messages.at(-1), { type: "peers", ids: [] });
+  await game.webSocketMessage(sockets[0], JSON.stringify({ type: "send", from: game.memory.players[0].home, to: game.memory.players[1].home }));
+  assert.equal(sockets[0].messages.at(-1).message, "对局已结束");
+  await game.webSocketMessage(sockets[0], JSON.stringify({ type: "chat", text: "can I still speak?" }));
+  assert.equal(game.memory.chat.length, 0);
+  const loserMessages = sockets[0].messages.length;
+  await game.alarm();
+  assert.equal(game.memory.phase, "playing");
+  assert.equal(sockets[0].messages.length, loserMessages);
+  assert.equal(sockets[1].messages.at(-1).phase, "playing");
+
+  const replacement = socket("ACDE");
+  sockets.push(replacement);
+  await game.onHello(replacement, {
+    type: "hello", playerId: "host", roomToken: game.memory.players[0].roomToken,
+    name: "host", code: "ACDE", intent: "join",
+  });
+  assert.equal(replacement.messages.at(-2).phase, "ended");
+  assert.deepEqual(replacement.messages.at(-1), { type: "peers", ids: [] });
+  const reconnectedMessages = replacement.messages.length;
+  await game.alarm();
+  assert.equal(replacement.messages.length, reconnectedMessages);
+});

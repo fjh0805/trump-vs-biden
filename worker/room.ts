@@ -161,7 +161,7 @@ export class GameRoom extends DurableObject<Env> {
       const named: { id: string; name: string; home?: string }[] = humans.map((h) => ({
         id: h.id,
         name: h.name,
-        home: h.home,
+        home: h.homeChoice ?? h.home,
       }));
       if (state.mode === "1v1" && named.length === 1) {
         named.push({ id: "ai-east", name: "电脑对手", home: "random" });
@@ -170,6 +170,7 @@ export class GameRoom extends DurableObject<Env> {
       state.players = layoutPlayers(state.mode, state.humanFaction, named, state.hostId);
       for (const p of state.players) {
         p.roomToken = tokens.get(p.id);
+        p.homeChoice = named.find((h) => h.id === p.id)?.home ?? "random";
         const live = this.socketOf(p.id);
         p.connected = p.isAI || !!live;
       }
@@ -193,6 +194,20 @@ export class GameRoom extends DurableObject<Env> {
       this.flush();
       return;
     }
+
+    if (msg.type === "continue") {
+      if (state.phase !== "ended" || !state.winner || state.winner === "draw" || player.faction !== state.winner) return;
+      state.continued = true;
+      state.phase = "playing";
+      state.armies = state.armies.filter((army) => army.faction === state.winner);
+      await this.save(state);
+      await this.ctx.storage.setAlarm(Date.now() + TICK_MS);
+      this.broadcast([], true);
+      this.sendPeerLists();
+      return;
+    }
+
+    if (state.continued && player.faction !== state.winner) return;
 
     if (msg.type === "chat") {
       const text = msg.text.trim().slice(0, 140);
@@ -225,6 +240,7 @@ export class GameRoom extends DurableObject<Env> {
 
     if (msg.type === "pickHome") {
       if (state.phase !== "lobby") return;
+      player.homeChoice = msg.home;
       player.home = resolveHome(player.faction, msg.home, state.mode === "2v2" ? player.zone : undefined);
       await this.save(state);
       this.broadcast();
@@ -232,10 +248,11 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     if (msg.type === "rematch") {
-      if (state.phase !== "ended" || !player.isHost) return;
+      if (state.phase !== "ended" || !player.isHost ||
+        (state.winner && state.winner !== "draw" && player.faction !== state.winner)) return;
       const humans: { id: string; name: string; home?: string }[] = state.players
         .filter((p) => !p.isAI || p.aiHold)
-        .map((h) => ({ id: h.id, name: h.name, home: h.home }));
+        .map((h) => ({ id: h.id, name: h.name, home: h.homeChoice ?? h.home }));
       if (state.mode === "1v1" && humans.length === 1) {
         humans.push({ id: "ai-east", name: "电脑对手", home: "random" });
       }
@@ -243,6 +260,7 @@ export class GameRoom extends DurableObject<Env> {
       state.players = layoutPlayers(state.mode, state.humanFaction, humans, state.hostId);
       for (const p of state.players) {
         p.roomToken = tokens.get(p.id);
+        p.homeChoice = humans.find((h) => h.id === p.id)?.home ?? "random";
         p.connected = p.isAI || !!this.socketOf(p.id);
       }
       seedMatch(state);
@@ -310,6 +328,7 @@ export class GameRoom extends DurableObject<Env> {
             faction,
             zone,
             home,
+            homeChoice: msg.home ?? "random",
             isAI: false,
             isHost: true,
             connected: true,
@@ -372,6 +391,7 @@ export class GameRoom extends DurableObject<Env> {
           faction,
           zone,
           home,
+          homeChoice: msg.home ?? "random",
           isAI: false,
           isHost: false,
           connected: true,
@@ -392,7 +412,7 @@ export class GameRoom extends DurableObject<Env> {
       }
     }
     await this.save(state);
-    this.broadcast();
+    this.broadcast([], true);
     this.sendPeerLists();
   }
 
@@ -411,13 +431,14 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcast(events);
   }
 
-  private broadcast(events: GameEvent[] = []) {
+  private broadcast(events: GameEvent[] = [], includeDefeated = false) {
     const state = this.memory;
     if (!state) return;
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att?.playerId) continue;
+      if (state.continued && !includeDefeated && state.players.find((p) => p.id === att.playerId)?.faction !== state.winner) continue;
       const snap = snapshotFor(state, att.playerId, events);
       ws.send(JSON.stringify(snap));
     }
@@ -426,12 +447,13 @@ export class GameRoom extends DurableObject<Env> {
   private sendPeerLists() {
     const state = this.memory;
     if (!state) return;
-    const humans = state.players.filter((p) => !p.isAI && p.connected).map((p) => p.id);
+    const humans = state.players.filter((p) => !p.isAI && p.connected && (!state.continued || p.faction === state.winner)).map((p) => p.id);
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       const att = ws.deserializeAttachment() as Attachment | null;
       if (!att?.playerId) continue;
-      ws.send(JSON.stringify({ type: "peers", ids: humans.filter((id) => id !== att.playerId) }));
+      const canSpeak = !state.continued || state.players.find((p) => p.id === att.playerId)?.faction === state.winner;
+      ws.send(JSON.stringify({ type: "peers", ids: canSpeak ? humans.filter((id) => id !== att.playerId) : [] }));
     }
   }
 }
