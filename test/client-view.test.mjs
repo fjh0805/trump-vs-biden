@@ -140,6 +140,70 @@ test("no troops and unexplored target give feedback without losing selection", (
   assert.equal(view.selected, "TX");
 });
 
+test("refreshing selection preserves predicted outgoing troops in the label and callout", () => {
+  const view = Object.create(GameView.prototype);
+  const number = { textContent: "12" };
+  const detail = { textContent: "" };
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    getElementById: (id) => id === "callout" ? {
+      querySelector: (selector) => selector === "strong" ? { textContent: "" } : detail,
+    } : null,
+  };
+  Object.assign(view, {
+    snap: {
+      phase: "playing", you: "me", mode: "1v1", players: [{ id: "me", name: "我", zone: "west" }],
+      states: { TX: { visible: true, ownerId: "me", troops: 12 } },
+    },
+    origins: new Set(["TX"]), selected: "TX", pendingSends: [{ from: "TX", to: "OK", n: 12, acked: false }],
+    svg: { getElementById: (id) => id === "st-TX" ? { classList: { toggle: () => {} } } : null },
+    labels: new Map([["TX", { n: number }]]),
+    upsertLabel: (id, zh, n) => { if (id === "TX") number.textContent = n; },
+    paintOrigin: () => {}, paintDragLine: () => {},
+  });
+  try {
+    view.refreshPick();
+    assert.equal(number.textContent, "0");
+    assert.match(detail.textContent, /0 兵/);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test("dragging off a target clears the target and unpins the drag line", () => {
+  const view = Object.create(GameView.prototype);
+  const targets = [];
+  Object.assign(view, {
+    dragging: true, dragMoved: true, dragStart: { x: 0, y: 0 }, lastDragPoint: { x: 20, y: 0 },
+    dragCandidate: null, dragTarget: "OK", dragPointer: { x: 20, y: 0 },
+    origins: new Set(["TX"]), selected: "TX",
+    snap: { phase: "playing", you: "me", mode: "1v1", players: [{ id: "me" }], states: { TX: { visible: true, ownerId: "me" } } },
+    hitState: () => null, clientToSvg: (x, y) => ({ x, y }),
+    refreshPick: () => targets.push(view.dragTarget),
+  });
+  view.selectMove(40, 0);
+  assert.equal(view.dragTarget, null);
+  assert.deepEqual(targets, [null]);
+});
+
+test("stationary drag target does not rewrite the SVG line", () => {
+  const view = Object.create(GameView.prototype);
+  let writes = 0;
+  const line = {
+    style: { display: "" }, d: "",
+    getAttribute() { return this.d; },
+    setAttribute(name, value) { this.d = value; writes++; },
+  };
+  Object.assign(view, {
+    dragging: true, origins: new Set(["TX"]), dragTarget: null,
+    dragPointer: { x: 70, y: 50 }, dragLine: line,
+  });
+  view.paintDragLine();
+  assert.equal(writes, 1);
+  view.paintDragLine();
+  assert.equal(writes, 1);
+});
+
 test("drag ending on another owned state collects it without dispatching troops", () => {
   const view = Object.create(GameView.prototype);
   const sends = [];

@@ -231,7 +231,7 @@ export class GameView {
       const x = this.lastDragPoint.x + ((cx - this.lastDragPoint.x) * i) / samples;
       const y = this.lastDragPoint.y + ((cy - this.lastDragPoint.y) * i) / samples;
       const id = this.hitState(x, y, false) ?? null;
-      if (id === this.dragCandidate) continue;
+      if (id === this.dragCandidate && (id !== null || this.dragTarget === null)) continue;
       if (this.dragCandidate && this.isOwnControllable(this.dragCandidate)) {
         this.origins.add(this.dragCandidate);
       }
@@ -317,8 +317,9 @@ export class GameView {
       tx = MAP.states[this.dragTarget].cx;
       ty = MAP.states[this.dragTarget].cy;
     }
-    this.dragLine.style.display = "";
-    this.dragLine.setAttribute("d", `M${c.x} ${c.y} L${tx} ${ty}`);
+    if (this.dragLine.style.display) this.dragLine.style.display = "";
+    const d = `M${c.x} ${c.y} L${tx} ${ty}`;
+    if (this.dragLine.getAttribute("d") !== d) this.dragLine.setAttribute("d", d);
   }
 
   private nearestState(cx: number, cy: number) {
@@ -730,7 +731,8 @@ export class GameView {
         this.upsertLabel(
           s.id,
           zh,
-          this.snap.phase === "lobby" ? "" : String(this.displayTroops(s.id)),
+          this.snap.phase === "lobby" ? "" : String(info.ownerId === this.snap.you
+            ? this.shownTroops(s.id, info) : this.displayTroops(s.id)),
           s.cx,
           s.cy,
         );
@@ -810,7 +812,8 @@ export class GameView {
     }
     const owner = this.snap?.players.find((p) => p.id === info.ownerId);
     const heading = labelEn(id);
-    const text = `${labelZh(id)} · ${owner ? owner.name : "中立"} · ${info.troops ?? 0} 兵`;
+    const troops = info.ownerId === this.snap?.you ? this.shownTroops(id, info) : info.troops ?? 0;
+    const text = `${labelZh(id)} · ${owner ? owner.name : "中立"} · ${troops} 兵`;
     if (title.textContent !== heading) title.textContent = heading;
     if (detail.textContent !== text) detail.textContent = text;
   }
