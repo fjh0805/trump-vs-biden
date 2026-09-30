@@ -302,8 +302,8 @@ export class GameView {
   private paintDragLine() {
     if (!this.dragLine) return;
     if (!this.dragging || this.origins.size === 0) {
-      this.dragLine.style.display = "none";
-      this.dragLine.setAttribute("d", "");
+      if (this.dragLine.style.display !== "none") this.dragLine.style.display = "none";
+      if (this.dragLine.getAttribute("d")) this.dragLine.setAttribute("d", "");
       return;
     }
     const c = this.originCentroid();
@@ -456,7 +456,7 @@ export class GameView {
 
   private hideLabel(id: string) {
     const row = this.labels.get(id);
-    if (row) row.g.style.display = "none";
+    if (row && row.g.style.display !== "none") row.g.style.display = "none";
   }
 
   revertLastSend() {
@@ -549,18 +549,21 @@ export class GameView {
       const row = this.labels.get(s.id);
       if (!row) continue;
       const isOrigin = this.origins.has(s.id) || this.selected === s.id;
-      row.zh.textContent = isOrigin ? `${labelZh(s.id)} · 起点` : labelZh(s.id);
+      const label = isOrigin ? `${labelZh(s.id)} · 起点` : labelZh(s.id);
+      if (row.zh.textContent !== label) row.zh.textContent = label;
       const target = this.shownTroops(s.id, info);
       if (info.ownerId === snap.you) {
         this.troopDisplays.set(s.id, { from: target, target, start: performance.now(), ownerId: info.ownerId, faction: info.faction });
       }
-      row.n.textContent = String(info.ownerId === snap.you ? target : this.displayTroops(s.id));
+      const number = String(info.ownerId === snap.you ? target : this.displayTroops(s.id));
+      if (row.n.textContent !== number) row.n.textContent = number;
     }
   }
 
   private upsertStream(a: ArmyView) {
     const duration = a.travelMs;
     let s = this.streams.get(a.id);
+    const created = !s;
     if (!s) {
       const root = el("g", { class: `army ${a.faction}` });
       s = {
@@ -595,10 +598,18 @@ export class GameView {
     this.ensureHeads(s, Math.max(1, Math.min(30, Math.floor(a.troops))));
     const seed = progressOf(a);
     const now = performance.now();
-    if (a.arrived && s.arrivedAt === null) this.startCombat(s, now);
-    const local = Math.min(1, (now - s.start) / duration);
-    // Keep small network timing differences from rewinding the marching heads.
-    if (seed > local || local - seed > 0.12) s.start = now - seed * duration;
+    if (a.arrived) {
+      s.p = 1;
+      if (s.arrivedAt === null) this.startCombat(s, now);
+    } else if (!created) {
+      const predicted = Math.max(s.p, Math.min(1, (now - s.start) / s.duration));
+      const driftMs = (seed - predicted) * duration;
+      if (driftMs > 0) s.start -= Math.min(35, driftMs);
+      else if (driftMs < -120) {
+        // Slow the prediction without moving its time axis behind the last drawn head.
+        s.start += Math.max(0, Math.min(25, -driftMs - 80, now - s.p * duration - s.start));
+      }
+    }
     s.duration = duration;
   }
 
@@ -652,7 +663,7 @@ export class GameView {
       s.trailHeads.push(g);
     }
     while (s.trailHeads.length > n) {
-      s.trailHeads.shift()?.remove();
+      s.trailHeads.pop()?.remove();
     }
   }
 
@@ -684,10 +695,11 @@ export class GameView {
     if (!badge || !name) return;
     const snap = this.snap;
     const on = !!(this.selected && snap && snap.phase !== "lobby");
-    badge.hidden = !on;
+    if (badge.hidden === on) badge.hidden = !on;
     if (on && this.selected) {
       const extra = this.origins.size > 1 ? ` +${this.origins.size - 1}` : "";
-      name.textContent = `${labelZh(this.selected)}${extra}`;
+      const text = `${labelZh(this.selected)}${extra}`;
+      if (name.textContent !== text) name.textContent = text;
     }
   }
 
@@ -786,19 +798,21 @@ export class GameView {
     const detail = elTip.querySelector("span");
     if (!title || !detail) return;
     if (!id || !MAP.states[id]) {
-      title.textContent = "州名";
-      detail.textContent = "点己方州，有视野就能出兵";
+      if (title.textContent !== "州名") title.textContent = "州名";
+      if (detail.textContent !== "点己方州，有视野就能出兵") detail.textContent = "点己方州，有视野就能出兵";
       return;
     }
     const info = this.snap?.states[id];
     if (!info?.visible) {
-      title.textContent = "迷雾";
-      detail.textContent = "尚未侦察";
+      if (title.textContent !== "迷雾") title.textContent = "迷雾";
+      if (detail.textContent !== "尚未侦察") detail.textContent = "尚未侦察";
       return;
     }
     const owner = this.snap?.players.find((p) => p.id === info.ownerId);
-    title.textContent = labelEn(id);
-    detail.textContent = `${labelZh(id)} · ${owner ? owner.name : "中立"} · ${info.troops ?? 0} 兵`;
+    const heading = labelEn(id);
+    const text = `${labelZh(id)} · ${owner ? owner.name : "中立"} · ${info.troops ?? 0} 兵`;
+    if (title.textContent !== heading) title.textContent = heading;
+    if (detail.textContent !== text) detail.textContent = text;
   }
 
   private playEvents(events: GameEvent[]) {
@@ -853,12 +867,16 @@ export class GameView {
     for (const [id, display] of this.troopDisplays) {
       if (display.from === display.target) continue;
       const row = this.labels.get(id);
-      if (row) row.n.textContent = String(this.displayTroops(id, now));
+      if (row) {
+        const text = String(this.displayTroops(id, now));
+        if (row.n.textContent !== text) row.n.textContent = text;
+      }
       if (now - display.start >= DAMAGE_TWEEN_MS) display.from = display.target;
     }
     for (const s of this.streams.values()) {
-      s.p = Math.max(0, Math.min(1, (now - s.start) / s.duration));
-      if (s.p >= 1 && s.arrivedAt === null) this.startCombat(s, now);
+      const previousProgress = s.p;
+      if (s.arrivedAt === null) s.p = Math.max(s.p, Math.min(1, (now - s.start) / s.duration));
+      if (s.arrivedAt === null && s.p === previousProgress) continue;
       const a = MAP.states[s.from];
       const b = MAP.states[s.to];
       if (!a || !b) continue;
@@ -892,13 +910,14 @@ export class GameView {
           opacity *= head.opacity;
         }
         if (along < 4 || opacity <= 0) {
-          th.setAttribute("opacity", "0");
+          if (th.getAttribute("opacity") !== "0") th.setAttribute("opacity", "0");
           continue;
         }
         const x = a.cx + ux * along + px * side;
         const y = a.cy + uy * along + py * side;
         // 修复手机端bug: 提升头像不透明度,强光下更清晰
-        th.setAttribute("opacity", String(opacity));
+        const opacityText = String(opacity);
+        if (th.getAttribute("opacity") !== opacityText) th.setAttribute("opacity", opacityText);
         th.setAttribute("transform", `translate(${x},${y})`);
       }
     }

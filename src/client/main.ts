@@ -301,9 +301,11 @@ function paint(s: RoomSnapshot) {
   entering = false;
   setEnterDisabled(false);
   view?.render(s);
-  $("room-code").textContent = s.code;
-  $("score").textContent = compactScore(s);
-  $("clock").textContent = s.continued ? "自由模式" : fmt(s.timeLeftMs);
+  const score = compactScore(s);
+  const clock = s.continued ? "自由模式" : fmt(s.timeLeftMs);
+  if ($("room-code").textContent !== s.code) $("room-code").textContent = s.code;
+  if ($("score").textContent !== score) $("score").textContent = score;
+  if ($("clock").textContent !== clock) $("clock").textContent = clock;
   const playerKey = JSON.stringify([s.you, s.players]);
   if (playerKey !== paintedPlayers) {
     $("players").innerHTML = s.players
@@ -333,14 +335,12 @@ function paint(s: RoomSnapshot) {
   const waitPeer = s.phase === "playing" && !s.continued && s.players.some((p) => p.id !== s.you && !p.isAI && !p.connected);
   $("banner").hidden = !waitPeer;
   $("banner").classList.toggle("show", waitPeer);
-  $("banner").textContent = COPY.peerWait;
   const host = s.you === s.hostId;
   if (solo && host && s.phase === "lobby") {
     solo = false;
     sock.send({ type: "start" });
   }
   $("btn-start").style.display = host && s.phase === "lobby" ? "block" : "none";
-  $("btn-start").textContent = COPY.start;
   paintLobbyHomes(s);
   if (was !== s.phase) setSheet(s.phase === "lobby");
   if (s.phase === "playing" && !s.continued) maybeShowTutorial();

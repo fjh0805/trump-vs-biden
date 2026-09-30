@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { build } from "esbuild";
 
@@ -12,6 +13,86 @@ const { outputFiles } = await build({
   write: false,
 });
 const { GameView } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].contents).toString("base64")}`);
+const states = JSON.parse(readFileSync("src/shared/us-map.json", "utf8")).states;
+
+test("army snapshots adjust marching time gradually instead of snapping heads to a new position", () => {
+  const view = Object.create(GameView.prototype);
+  const duration = 2000;
+  const stream = {
+    id: "a1", from: "TX", to: "OK", duration,
+    start: performance.now() - 200, p: 0.1,
+    arrivedAt: null, trailHeads: [],
+  };
+  view.streams = new Map([[stream.id, stream]]);
+  view.ensureHeads = () => {};
+  const armyAt = (progress) => ({
+    id: "a1", from: "TX", to: "OK", troops: 20, travelMs: duration, arrived: false,
+    x: states.TX.cx + (states.OK.cx - states.TX.cx) * progress,
+    y: states.TX.cy + (states.OK.cy - states.TX.cy) * progress,
+  });
+
+  const before = stream.start;
+  view.upsertStream(armyAt(0.6));
+  assert.ok(before - stream.start > 0 && before - stream.start <= 35);
+  stream.p = 0.55;
+  stream.start = performance.now() - duration * 0.56;
+  const beforeSlowdown = stream.start;
+  view.upsertStream(armyAt(0.1));
+  assert.ok(stream.start - beforeSlowdown > 0 && stream.start - beforeSlowdown <= 25);
+  assert.ok((performance.now() - stream.start) / duration >= stream.p);
+  assert.equal(stream.p, 0.55);
+  stream.start = performance.now() - 200;
+  const backloggedStart = stream.start;
+  view.upsertStream(armyAt(0.1));
+  assert.equal(stream.start, backloggedStart);
+
+  let combats = 0;
+  view.startCombat = (s) => { combats++; s.arrivedAt = performance.now(); };
+  view.upsertStream(armyAt(0.99));
+  assert.equal(combats, 0);
+  view.upsertStream({ ...armyAt(1), arrived: true });
+  assert.equal(stream.p, 1);
+  assert.equal(combats, 1);
+  view.upsertStream({ ...armyAt(1), arrived: true });
+  assert.equal(combats, 1);
+});
+
+test("army casualties remove trailing heads without shifting the surviving formation slots", () => {
+  const view = Object.create(GameView.prototype);
+  const removed = [];
+  const heads = [0, 1, 2, 3].map((slot) => ({ dataset: { slot: String(slot) }, remove: () => removed.push(slot) }));
+  const stream = { trailHeads: heads };
+  view.ensureHeads(stream, 2);
+  assert.deepEqual(stream.trailHeads.map((head) => Number(head.dataset.slot)), [0, 1]);
+  assert.deepEqual(removed, [3, 2]);
+});
+
+test("unchanged combat snapshots do not rewrite the territory callout", () => {
+  const previousDocument = globalThis.document;
+  let writes = 0;
+  const textNode = () => ({
+    value: "",
+    get textContent() { return this.value; },
+    set textContent(value) { this.value = value; writes++; },
+  });
+  const title = textNode();
+  const detail = textNode();
+  const callout = { querySelector: (selector) => selector === "strong" ? title : detail };
+  globalThis.document = { getElementById: (id) => id === "callout" ? callout : null };
+  const view = Object.create(GameView.prototype);
+  view.snap = { players: [], states: { TX: { visible: true, ownerId: null, troops: 5 } } };
+  try {
+    view.tip("TX");
+    assert.equal(writes, 2);
+    view.tip("TX");
+    assert.equal(writes, 2);
+    view.snap.states.TX.troops = 4;
+    view.tip("TX");
+    assert.equal(writes, 3);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
 
 test("a rejected send removes the first unacknowledged prediction", () => {
   const view = Object.create(GameView.prototype);
